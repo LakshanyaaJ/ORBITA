@@ -1,0 +1,102 @@
+{
+  "experiment_name": "Sample Box Experiment",
+  "experiment_id_prefix": "EXP",
+  "version": "1.0",
+  "description": "Standard astronaut experiment procedure for BAS microgravity sample handling.",
+  "steps": [
+    {
+      "id": 1,
+      "action": "OPEN_MAIN_BOX",
+      "label": "Open Main Box",
+      "description": "Open the main experiment container lid.",
+      "expected_objects": ["MAIN_BOX"],
+      "voice_prompt": "Step one: Open the main box.",
+      "completion_voice": "Main box opened. Proceed to step two.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": 2,
+      "action": "TAKE_RED_BOX",
+      "label": "Take Red Box",
+      "description": "Retrieve the red sample box from the main container.",
+      "expected_objects": ["RED_BOX"],
+      "voice_prompt": "Step two: Take the red box.",
+      "completion_voice": "Red box retrieved. Proceed to step three.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": 3,
+      "action": "TAKE_YELLOW_BOX",
+      "label": "Take Yellow Box",
+      "description": "Retrieve the yellow reagent box from the main container.",
+      "expected_objects": ["YELLOW_BOX"],
+      "voice_prompt": "Step three: Take the yellow box.",
+      "completion_voice": "Yellow box retrieved. Proceed to step four.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": 4,
+      "action": "OPEN_RED_BOX",
+      "label": "Open Red Box",
+      "description": "Open the red sample box to access the sample chamber.",
+      "expected_objects": ["RED_BOX"],
+      "voice_prompt": "Step four: Open the red box.",
+      "completion_voice": "Red box opened. Proceed to step five.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": 5,
+      "action": "TAKE_SAMPLE",
+      "label": "Take Sample",
+      "description": "Extract the sample from the red box chamber.",
+      "expected_objects": ["SAMPLE"],
+      "voice_prompt": "Step five: Take the sample.",
+      "completion_voice": "Sample extracted. Proceed to step six.",
+      "timeout_seconds": 45
+    },
+    {
+      "id": 6,
+      "action": "PERFORM_EXPERIMENT",
+      "label": "Perform Experiment",
+      "description": "Conduct the experiment procedure with the sample.",
+      "expected_objects": ["SAMPLE", "YELLOW_BOX"],
+      "voice_prompt": "Step six: Perform the experiment.",
+      "completion_voice": "Experiment complete. Proceed to step seven.",
+      "timeout_seconds": 120
+    },
+    {
+      "id": 7,
+      "action": "CLOSE_BOX",
+      "label": "Close Box",
+      "description": "Close and seal the sample container.",
+      "expected_objects": ["RED_BOX", "MAIN_BOX"],
+      "voice_prompt": "Step seven: Close and seal the boxes.",
+      "completion_voice": "Boxes sealed. Proceed to final step.",
+      "timeout_seconds": 30
+    },
+    {
+      "id": 8,
+      "action": "STORE_COMPONENTS",
+      "label": "Store Components",
+      "description": "Return all components to the payload storage location.",
+      "expected_objects": ["MAIN_BOX"],
+      "voice_prompt": "Step eight: Store all components.",
+      "completion_voice": "Experiment complete. All components stored. Well done.",
+      "timeout_seconds": 30
+    }
+  ],
+  "error_messages": {
+    "WRONG_OBJECT": "Incorrect object. Please use the {expected_object}.",
+    "STEP_SKIPPED": "Step {skipped_step} was skipped. Please complete step {skipped_step} first.",
+    "OUT_OF_SEQUENCE": "Action out of sequence. Please perform step {expected_step} first.",
+    "REPEATED_ACTION": "This step has already been completed. Proceeding to next step.",
+    "UNCERTAIN": "Unable to confidently identify the action. Please hold your position.",
+    "TIMEOUT": "Step timeout. Please proceed with {expected_action}."
+  },
+  "thresholds": {
+    "action_confidence_min": 0.55,
+    "interaction_frames_required": 5,
+    "hand_object_contact_distance_px": 60,
+    "temporal_window_frames": 30
+  }
+}

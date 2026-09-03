@@ -1,0 +1,12 @@
+{
+  "experiment_id": "EXP44080",
+  "experiment_name": "Sample Box Experiment",
+  "start_time": "2026-09-03T14:01:20.770915Z",
+  "end_time": "2026-09-03T14:01:20.781Z",
+  "duration_seconds": 0.0,
+  "total_steps": 8,
+  "completed_steps": [],
+  "error_count": 0,
+  "overall_status": "SUCCESS",
+  "entries": []
+}

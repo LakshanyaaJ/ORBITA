@@ -1,0 +1,46 @@
+# ORBITA — Offline AI Experiment Copilot
+# Python 3.10+ required
+
+# Core Vision
+opencv-python>=4.9.0
+numpy>=1.26.0
+
+# Object Detection & Pose (offline models)
+ultralytics>=8.2.0          # YOLOv8 / YOLO11
+
+# Hand tracking (optional MediaPipe)
+mediapipe>=0.10.0
+
+# Deep Learning — Temporal HAR
+torch>=2.2.0
+torchvision>=0.17.0
+
+# Web Backend
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+websockets>=12.0
+python-multipart>=0.0.9
+
+# Offline TTS
+pyttsx3>=2.90
+
+# Database
+# sqlite3 is built-in to Python — no extra package needed
+
+# Data & Config
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+
+# Logging & Export
+rich>=13.7.0                # Beautiful console output
+python-dotenv>=1.0.0
+
+# Image & Video
+Pillow>=10.3.0
+
+# Testing
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+
+# Utilities
+psutil>=5.9.0               # CPU/memory telemetry
