@@ -1,0 +1,34 @@
+{
+  "system": {
+    "name": "ORBITA",
+    "version": "1.0.0",
+    "target_hardware": "NVIDIA Jetson Orin Nano / Desktop Workstation"
+  },
+  "camera": {
+    "source": 0,
+    "width": 640,
+    "height": 480,
+    "fps": 30,
+    "flip": false,
+    "supported_modes": ["jetson_csi", "usb_v4l2", "phone_ip", "simulation"]
+  },
+  "models": {
+    "yolo_detection": "models/yolov8n.pt",
+    "yolo_pose": "models/yolov8n-pose.pt",
+    "har_checkpoint": "models/orbita_gru.pth"
+  },
+  "api": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "frontend_dist": "frontend/dist",
+    "cors_origins": ["*"]
+  },
+  "database": {
+    "path": "experiments/orbita.db"
+  },
+  "voice": {
+    "enabled": true,
+    "rate": 160,
+    "volume": 1.0
+  }
+}

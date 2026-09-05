@@ -1,52 +1,29 @@
 @import "tailwindcss";
 
-:root {
-  --color-bg-deep: #030811;
-  --color-bg-surface: #060e1a;
-  --color-bg-card: #0b1120;
-  --color-border: #1e3a5f;
-  --color-accent: #38bdf8;
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
-  --color-error: #ef4444;
+@theme {
+  --color-space-900: #0B1118;
+  --color-space-800: #111A23;
+  --color-space-700: #17222D;
+  --color-space-600: #273542;
+  --color-space-100: #F2F5F7;
+  --color-space-400: #94A3AF;
+  
+  --color-accent-cyan: #5BB8D4;
+  --color-status-success: #4CAF7D;
+  --color-status-warning: #D6A84F;
+  --color-status-critical: #D96565;
+  
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
 }
 
-* { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  background: var(--color-bg-deep);
-  color: white;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-  -webkit-font-smoothing: antialiased;
-  overflow: hidden;
-}
-
-/* Scrollbar styling */
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: #060e1a; }
-::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #38bdf8; }
-
-/* Custom animation */
-@keyframes pulse-once {
-  0% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.8; transform: scale(1.01); }
-  100% { opacity: 1; transform: scale(1); }
-}
-.animate-pulse-once { animation: pulse-once 0.5s ease-out; }
-
-/* Scan line effect for screens */
-.scan-overlay::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0, 0, 0, 0.02) 2px,
-    rgba(0, 0, 0, 0.02) 4px
-  );
-  pointer-events: none;
+@layer base {
+  body {
+    background-color: var(--color-space-900);
+    color: var(--color-space-100);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+  }
 }

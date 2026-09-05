@@ -1,177 +1,127 @@
-# ORBITA — How to Run Guide
-**SIH Problem ID: 26174 — AI Human Activity Recognition for On-Board BAS Experiments**
-**Project:** ORBITA — Offline AI Experiment Copilot for Astronauts
+# ORBITA — Execution & Deployment Guide
+
+This guide describes how to run and deploy **ORBITA** (Offline AI Human Activity Recognition & Experiment Copilot) on local workstations and edge devices like the **NVIDIA Jetson Orin Nano**.
 
 ---
 
-## 🚀 Quick Start (Fastest Way to Run)
+## 1. System Requirements
 
-The easiest and recommended way to run ORBITA is in **Web Mission Control Mode**:
-
-```powershell
-# 1. Navigate to the project root
-cd c:\project\ORB
-
-# 2. Run the main application
-python main.py --mode web --scenario A --port 8000
-```
-
-Once started, open your web browser and navigate to:
-👉 **[http://localhost:8000](http://localhost:8000)**
+### Workstation / Jetson Orin Nano
+- **Operating System**: Linux (Ubuntu 20.04 / 22.04 / JetPack 5.x–6.x) or Windows 10/11
+- **Python**: 3.9+ (Python 3.10–3.13 supported)
+- **Node.js**: v18+ or v20+ with npm
+- **Hardware Acceleration**: NVIDIA Jetson Orin Nano (CUDA / TensorRT supported via PyTorch)
 
 ---
 
-## 🛠️ Prerequisites & Installation
+## 2. Environment Setup
 
-### 1. Python Environment (3.10 – 3.13)
-Install Python dependencies:
-```powershell
+### A. Python Backend Setup
+```bash
+# 1. Clone or navigate to the repository
+cd ORBITA
+
+# 2. Create and activate a virtual environment (optional but recommended)
+python -m venv .venv
+
+# On Linux / Jetson:
+source .venv/bin/activate
+# On Windows PowerShell:
+.venv\Scripts\Activate.ps1
+
+# 3. Install dependencies
 pip install -r requirements.txt
 ```
-*(Or install core dependencies directly)*:
-```powershell
-pip install fastapi "uvicorn[standard]" websockets pyttsx3 opencv-python numpy psutil rich python-multipart pydantic pydantic-settings Pillow pytest
-```
 
-### 2. Frontend Dashboard (React + TypeScript)
-The production bundle is already pre-compiled inside `frontend/dist/` and served automatically by FastAPI. 
-
-If you want to edit or develop the frontend live with hot reload:
-```powershell
+### B. Frontend Setup
+```bash
 cd frontend
 npm install
+```
+
+---
+
+## 3. Launching ORBITA
+
+### Option 1: Web Mode (Full Stack — Recommended)
+
+**Terminal 1 — Start the FastAPI Backend**:
+```bash
+python main.py --mode web --scenario A
+```
+* Backend API serves at: `http://localhost:8000`
+* MJPEG Video Stream at: `http://localhost:8000/video_feed` (and `/api/camera/stream`)
+* Telemetry WebSocket at: `ws://localhost:8000/ws/telemetry`
+
+**Terminal 2 — Start the React Dashboard**:
+```bash
+cd frontend
 npm run dev
 ```
-The dev server will run on **`http://localhost:5173`** (proxied to the backend at port 8000).
+* Dashboard will be live at: `http://localhost:5173`
 
-To build a fresh production bundle:
-```powershell
+---
+
+### Option 2: Desktop Mode (OpenCV Window — Offline)
+Run offline without starting a web browser:
+```bash
+python main.py --mode desktop --scenario A
+```
+Press `q` or `ESC` in the OpenCV window to exit.
+
+---
+
+### Option 3: Headless Mode (CLI / Benchmarking)
+```bash
+python main.py --mode headless --scenario A
+```
+
+---
+
+## 4. Camera Sources & Streaming
+
+ORBITA supports seamless switching between camera sources directly from the dashboard:
+
+```text
+Camera Source
+[ Jetson Camera ]   [ Phone IP Camera ]   [ Simulation ]
+```
+
+### 1. Jetson CSI / USB Camera
+- Select **Jetson Camera** in the dashboard or launch with `--camera 0`:
+  ```bash
+  python main.py --mode web --camera 0
+  ```
+
+### 2. Phone IP Camera (Wi-Fi Streaming)
+Connect any smartphone as a high-definition wireless sensor:
+1. Install an IP webcam app on your phone:
+   - **Android**: *IP Webcam* (by Pavel Khlebovich) or *DroidCam*.
+   - **iOS**: Any RTSP/MJPEG IP streaming app.
+2. Ensure phone and Jetson/PC are connected to the **same Wi-Fi network** (or connect your device to your phone's Wi-Fi hotspot).
+3. Tap **Start server** in the phone app.
+4. In the ORBITA dashboard under **Live Experiment**:
+   - Select **Phone IP Camera**.
+   - Enter your phone's IP address (e.g. `192.168.1.105`), Port `8080`, and Path `/video`.
+   - Click **Connect Camera**.
+
+### 3. Synthetic Simulation
+- Select **Simulation** in the dashboard or run with `--scenario A|B|C`.
+  - **Scenario A**: Nominal execution (all steps pass sequentially).
+  - **Scenario B**: Deviation error (wrong object used).
+  - **Scenario C**: Protocol violation (step skipped).
+
+---
+
+## 5. Verification & Testing
+
+Run all automated unit and integration tests:
+```bash
+pytest tests/ -v
+```
+
+Build the production frontend bundle:
+```bash
 cd frontend
 npm run build
 ```
-
----
-
-## 🕹️ Execution Modes
-
-ORBITA supports three primary run modes:
-
-### Mode 1: Web Mission Control (Recommended)
-Combines the AI perception pipeline, deterministic FSM, offline TTS voice assistant, MJPEG video streaming, and the React dashboard in a single command:
-
-```powershell
-# Run with Scenario A (Nominal execution)
-python main.py --mode web --scenario A --port 8000
-
-# Run with Scenario B (Simulate wrong object procedural deviation)
-python main.py --mode web --scenario B --port 8000
-
-# Run with Scenario C (Simulate skipped step procedural deviation)
-python main.py --mode web --scenario C --port 8000
-```
-
-### Mode 2: Live Physical Webcam
-To use your laptop or workstation webcam instead of the visual simulator:
-
-```powershell
-# Use webcam 0
-python main.py --mode web --camera 0
-
-# Use an external USB or payload camera (e.g. device 1)
-python main.py --mode web --camera 1
-
-# Process a pre-recorded test video file
-python main.py --mode web --camera "path/to/experiment_video.mp4"
-```
-
-### Mode 3: Desktop Mode (OpenCV Window)
-Direct local desktop window (requires GUI-enabled OpenCV build):
-
-```powershell
-python main.py --mode desktop --scenario A
-```
-*Keyboard controls in desktop mode:*
-- `a`: Switch to Scenario A (Nominal)
-- `b`: Switch to Scenario B (Wrong Object)
-- `c`: Switch to Scenario C (Skipped Step)
-- `r`: Reset experiment to Step 1
-- `q`: Quit
-
-*(Note: If your environment uses a headless OpenCV build, it will automatically fall back to Web mode).*
-
----
-
-## 🖥️ Using the Mission Control Dashboard (`http://localhost:8000`)
-
-When the dashboard opens, you have access to:
-
-1. **Live Video Feed (Top-Left)**:
-   - Real-time video with AI perception overlays, bounding boxes, action status, and FPS counter.
-2. **Alert & Recovery Panel (Bottom-Left)**:
-   - Displays real-time procedural alerts.
-   - Compares **Expected Action** vs. **Detected Action**.
-   - Gives clear spoken and visual voice recovery guidance for astronauts.
-3. **Current & Next Step Cards (Top-Right)**:
-   - Shows active step number, procedure label, action confidence bar, and upcoming step preview.
-4. **Procedure Timeline (Middle-Right)**:
-   - Live progress indicator with status markers:
-     - `✓ DONE` (Step passed successfully)
-     - `→ IN PROGRESS` (Currently awaiting or executing)
-     - `⚠ ERROR / SKIPPED` (Procedural deviation flagged)
-5. **System Health Status (Bottom-Right)**:
-   - Live heartbeats for AI Engine, Camera, TTS Voice, Recording, MJPEG Stream, CPU %, and RAM %.
-6. **Top Control Bar**:
-   - **Scenario Buttons (`A`, `B`, `C`)**: Instantly switch simulation scenarios live without restarting the server.
-   - **RESET**: Reset the experiment FSM back to Step 1.
-   - **RECORD / STOP REC**: Save an annotated `.mp4` video recording into `experiments/`.
-   - **EXPORT LOG**: Export audit logs to JSON, CSV, and SQLite.
-
----
-
-## 🧪 Running the Automated Test Suite
-
-ORBITA includes 49 automated tests covering Perception, Temporal HAR, Finite State Machine, Rule Engine, and full End-to-End simulation:
-
-```powershell
-# Run all tests
-python -m pytest tests/ -v
-
-# Run with concise summary
-python -m pytest tests/ -v --tb=short
-```
-
-Expected result:
-```
-============================= 49 passed in ~35s =============================
-```
-
----
-
-## 📡 API Endpoints & Ports
-
-When the backend runs on port 8000:
-- **Dashboard UI**: `http://localhost:8000/`
-- **MJPEG Live Video Stream**: `http://localhost:8000/video_feed`
-- **WebSocket Telemetry**: `ws://localhost:8000/ws/telemetry`
-- **System Health Status**: `http://localhost:8000/api/status`
-- **Past Experiment History**: `http://localhost:8000/api/experiments`
-- **Experiment Control API**: `POST http://localhost:8000/api/control`
-
----
-
-## ❓ Troubleshooting
-
-### Error: `[Errno 10048] Only one usage of each socket address is normally permitted`
-- **Cause**: An instance of ORBITA is already running on port 8000.
-- **Fix**: Either use the already-running instance in your browser at `http://localhost:8000`, or terminate the existing process:
-  ```powershell
-  Get-NetTCPConnection -LocalPort 8000 | Select-Object -ExpandProperty OwningProcess | Stop-Process -Force
-  ```
-  Or run ORBITA on a different port:
-  ```powershell
-  python main.py --mode web --scenario A --port 8080
-  ```
-
-### Voice output is silent
-- Voice is powered by `pyttsx3` (Windows SAPI5 offline speech engine).
-- If your system has no audio output device connected or SAPI5 is disabled, ORBITA continues running smoothly in silent mode without throwing errors. All voice messages are still transcribed in real-time on the dashboard HUD.

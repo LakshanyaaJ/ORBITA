@@ -11,8 +11,11 @@ import sys
 import unittest
 import numpy as np
 
-import ORBITA
-sys.modules['orbita'] = ORBITA
+try:
+    import orbita
+except ImportError:
+    import ORBITA as orbita
+    sys.modules['orbita'] = orbita
 
 from orbita.video.camera_config import (
     validate_and_format_camera_url,

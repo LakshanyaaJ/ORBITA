@@ -71,15 +71,19 @@ def validate_and_format_camera_url(
 
     clean_ip = ip.strip()
     
-    # If the user pasted a full URL or http/https into the IP box, treat it as a full URL
-    if clean_ip.startswith("http://") or clean_ip.startswith("https://") or clean_ip.startswith("rtsp://"):
-        return validate_and_format_camera_url(url=clean_ip)
+    # Strip any http:// or https:// or rtsp:// prefix if entered in IP field
+    if clean_ip.startswith("http://"):
+        clean_ip = clean_ip[7:]
+    elif clean_ip.startswith("https://"):
+        clean_ip = clean_ip[8:]
+    elif clean_ip.startswith("rtsp://"):
+        clean_ip = clean_ip[7:]
 
     # Check if a path is included in the IP string (e.g. 192.168.1.105:8080/video or 192.168.1.105/video)
     if "/" in clean_ip:
         ip_part, path_part = clean_ip.split("/", 1)
         clean_ip = ip_part
-        if not path or not path.strip():
+        if path_part and (not path or not str(path).strip() or str(path).strip() == "/video"):
             path = "/" + path_part
 
     # Check if a port is included in the IP string (e.g. 192.168.1.105:8080)
