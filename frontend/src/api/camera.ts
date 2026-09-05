@@ -55,7 +55,10 @@ export interface ConnectCameraParams {
   timeout_sec?: number;
 }
 
-const BACKEND_BASE = 'http://localhost:8000';
+export const BACKEND_BASE =
+  typeof window !== 'undefined' && window.location.hostname
+    ? `${window.location.protocol}//${window.location.hostname}:8000`
+    : 'http://localhost:8000';
 
 export async function getCameraStatus(): Promise<CameraStatus> {
   try {

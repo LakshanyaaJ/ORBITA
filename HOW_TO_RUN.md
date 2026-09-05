@@ -43,7 +43,25 @@ npm install
 
 ## 3. Launching ORBITA
 
-### Option 1: Web Mode (Full Stack — Recommended)
+### Option 0: One-Click Windows Launcher (Fastest)
+Double-click or execute from the terminal:
+```cmd
+start.bat
+```
+This automatically:
+1. Detects your Python environment (`.venv`, `venv`, or system Python).
+2. Launches the **FastAPI Backend** on port `8000` in a titled console window.
+3. Launches the **React Frontend** on port `5173` in a titled console window.
+4. Opens `http://localhost:5173` in your default browser.
+
+To terminate both services at any time, close their windows or run:
+```cmd
+stop.bat
+```
+
+---
+
+### Option 1: Web Mode (Manual Full Stack)
 
 **Terminal 1 — Start the FastAPI Backend**:
 ```bash

@@ -36,6 +36,9 @@ logs/
 *.db-journal
 *.db-wal
 *.db-shm
+# Runtime experiment logs & sessions
+experiments/EXP*/
+experiments/*.json
 !experiments/.gitkeep
 
 # IDE & Editor
