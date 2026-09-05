@@ -6,10 +6,16 @@
   },
   "camera": {
     "source": 0,
-    "width": 640,
-    "height": 480,
+    "width": 1280,
+    "height": 720,
     "fps": 30,
     "flip": false,
+    "buffer_size": 1,
+    "jpeg_quality": 70,
+    "drop_old_frames": true,
+    "prefer_hardware_acceleration": true,
+    "low_latency": true,
+    "ai_fps": 15,
     "supported_modes": ["jetson_csi", "usb_v4l2", "phone_ip", "simulation"]
   },
   "models": {

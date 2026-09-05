@@ -24,11 +24,16 @@ class IPCameraConfig:
     path: str = "/video"
     timeout_sec: float = 4.0
     buffer_size: int = 1
-    reconnect_interval_sec: float = 3.0
+    reconnect_interval_sec: float = 2.0
     max_reconnect_attempts: int = 10
     target_fps: int = 30
-    width: int = 640
-    height: int = 480
+    width: int = 1280
+    height: int = 720
+    jpeg_quality: int = 70
+    drop_old_frames: bool = True
+    prefer_hardware_acceleration: bool = True
+    low_latency: bool = True
+    ai_fps: int = 15
 
 
 def get_default_ip_camera_url() -> str:

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import AuthPage from './pages/AuthPage';
+import PhoneWebcam from './pages/PhoneWebcam';
 import MissionHome from './pages/MissionHome';
 import ExperimentBrowser from './pages/ExperimentBrowser';
 import ExperimentBriefing from './pages/ExperimentBriefing';
@@ -14,6 +15,8 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/cam" element={<PhoneWebcam />} />
+        <Route path="/phone-cam" element={<Navigate to="/cam" replace />} />
         
         {/* Protected Operational Routes */}
         <Route element={<PageShell />}>

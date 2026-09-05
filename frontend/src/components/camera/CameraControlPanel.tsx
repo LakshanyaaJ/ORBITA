@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Camera, Settings, RefreshCw } from 'lucide-react';
+import { Camera, Settings, RefreshCw, QrCode, ExternalLink, Smartphone } from 'lucide-react';
 import CameraSourceSelector, { type CameraSourceType } from './CameraSourceSelector';
 import IPWebcamConfig from './IPWebcamConfig';
 import CameraConnectionStatus from './CameraConnectionStatus';
 import CameraMetrics from './CameraMetrics';
+import PhoneCameraQRModal from './PhoneCameraQRModal';
 import {
   getCameraStatus,
   connectCamera,
@@ -31,7 +32,8 @@ export default function CameraControlPanel({
   });
   const [selectedSource, setSelectedSource] = useState<CameraSourceType>('sim');
   const [loading, setLoading] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(true); // Open by default for easy access
+  const [isExpanded, setIsExpanded] = useState(true);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   const userEditingRef = useRef(false);
   const initialLoadRef = useRef(false);
@@ -41,16 +43,14 @@ export default function CameraControlPanel({
     const current = await getCameraStatus();
     setStatus(current);
 
-    // Only update selectedSource if this is the first load or if user is not actively selecting another source
     if (!initialLoadRef.current) {
-      if (current.source === 'ip_camera' || current.source === 'jetson_camera' || current.source === 'sim') {
-        setSelectedSource(current.source);
+      if (['phone_webcam', 'ip_camera', 'jetson_camera', 'sim'].includes(current.source)) {
+        setSelectedSource(current.source as CameraSourceType);
       }
       initialLoadRef.current = true;
     } else if (!userEditingRef.current) {
-      // If user is not actively editing/configuring, sync to backend source
-      if (current.source === 'ip_camera' || current.source === 'jetson_camera' || current.source === 'sim') {
-        setSelectedSource(current.source);
+      if (['phone_webcam', 'ip_camera', 'jetson_camera', 'sim'].includes(current.source)) {
+        setSelectedSource(current.source as CameraSourceType);
       }
     }
 
@@ -78,8 +78,14 @@ export default function CameraControlPanel({
       await connectCamera({ source: 'jetson_camera', device_index: 0 });
       await fetchStatus();
       setLoading(false);
+    } else if (newSource === 'phone_webcam') {
+      userEditingRef.current = false;
+      setLoading(true);
+      await connectCamera({ source: 'phone_webcam' });
+      await fetchStatus();
+      setLoading(false);
+      setShowQrModal(true);
     } else if (newSource === 'ip_camera') {
-      // Keep selected on ip_camera and do not let background poll revert it!
       userEditingRef.current = true;
       setIsExpanded(true);
     }
@@ -166,6 +172,46 @@ export default function CameraControlPanel({
             disabled={loading}
           />
 
+          {/* Phone Web App Stream Configuration Card */}
+          {selectedSource === 'phone_webcam' && (
+            <div className="p-3 bg-space-900/80 border border-space-600 rounded flex flex-col gap-2.5 font-mono text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Smartphone size={15} className="text-accent-cyan" />
+                  <span className="text-space-200 font-bold">Wireless Phone Web Cam</span>
+                </div>
+                <span className={status.connected ? 'text-status-success font-bold' : 'text-status-warning font-bold'}>
+                  {status.connected ? '● CONNECTED' : '○ READY TO PAIR'}
+                </span>
+              </div>
+              <p className="text-[11px] text-space-400">
+                Scan QR code with your phone camera or visit <span className="text-accent-cyan font-bold">/cam</span>. No app required.
+              </p>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowQrModal(true)}
+                  className="flex-1 py-1.5 px-3 rounded bg-accent-cyan text-space-950 hover:bg-sky-400 font-bold flex items-center justify-center gap-1.5 transition-all text-xs"
+                >
+                  <QrCode size={14} />
+                  <span>PAIR PHONE CAMERA (QR)</span>
+                </button>
+
+                <a
+                  href="/cam"
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open phone camera view in new browser tab"
+                  className="py-1.5 px-3 rounded bg-space-700 hover:bg-space-600 text-space-200 flex items-center justify-center gap-1 transition-colors text-xs"
+                >
+                  <span>Open Here</span>
+                  <ExternalLink size={12} />
+                </a>
+              </div>
+            </div>
+          )}
+
           {selectedSource === 'ip_camera' && (
             <IPWebcamConfig
               status={status}
@@ -190,6 +236,16 @@ export default function CameraControlPanel({
           )}
         </div>
       )}
+
+      {/* Phone Camera QR Pairing Modal */}
+      <PhoneCameraQRModal
+        isOpen={showQrModal}
+        onClose={() => setShowQrModal(false)}
+        onConnected={() => {
+          fetchStatus();
+          setShowQrModal(false);
+        }}
+      />
     </div>
   );
 }

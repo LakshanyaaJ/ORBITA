@@ -1,58 +1,138 @@
 """
 ORBITA IP Camera Module
 =======================
-Low-latency video frame capture for Phone IP Cameras and RTSP/HTTP streams.
+Ultra-low-latency video frame capture for Phone IP Cameras and RTSP/HTTP streams.
 
 Optimized for edge deployment (NVIDIA Jetson Orin Nano / Host PC):
-  - Drops stale frames via 1-frame queue to eliminate buffer lag
-  - Computes real-time streaming latency (ms) and actual FPS
+  - Uses LatestFrameBuffer (bounded size=1) with zero queue accumulation
+  - Drops stale frames immediately: latest frame > every frame
+  - Low-latency FFmpeg capture options (nobuffer, low_delay, max_delay=0)
+  - Hardware-accelerated GStreamer decoding on Jetson (nvv4l2decoder / nvjpegdec)
+  - Continuous socket drain without artificial sleep delays
+  - Computes real-time streaming latency (ms), frame drop rate, and actual FPS
   - Non-blocking connection check with timeout protection
-  - Auto-reconnection logic on temporary network interruption
+  - Automatic reconnection with exponential backoff
   - Clean resource acquisition and release
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import cv2
 import numpy as np
 
 from core_ai.video.camera_config import IPCameraConfig
+from core_ai.video.frame_buffer import LatestFrameBuffer
 
 logger = logging.getLogger(__name__)
 
 
+def _build_gstreamer_pipeline(url: str, config: IPCameraConfig) -> Optional[str]:
+    """
+    Construct an ultra-low-latency GStreamer pipeline for NVIDIA Jetson hardware acceleration.
+    """
+    if url.startswith("rtsp://"):
+        return (
+            f'rtspsrc location="{url}" latency=0 buffer-mode=none drop-on-latency=true ! '
+            f'rtph264depay ! h264parse ! '
+            f'nvv4l2decoder enable-max-performance=1 ! '
+            f'nvvidconv ! video/x-raw, format=BGRx ! '
+            f'videoconvert ! video/x-raw, format=BGR ! '
+            f'appsink drop=true max-buffers=1 sync=false'
+        )
+    elif url.startswith("http://") or url.startswith("https://"):
+        # For HTTP MJPEG stream (e.g. Android IP Webcam)
+        return (
+            f'souphttpsrc location="{url}" is-live=true ! '
+            f'jpegparse ! nvjpegdec ! '
+            f'nvvidconv ! video/x-raw, format=BGRx ! '
+            f'videoconvert ! video/x-raw, format=BGR ! '
+            f'appsink drop=true max-buffers=1 sync=false'
+        )
+    return None
+
+
+def _open_capture_device(url: str, config: IPCameraConfig) -> Optional[cv2.VideoCapture]:
+    """
+    Open video stream using optimal low-latency flags for FFmpeg / GStreamer.
+    """
+    # 1. Set low-latency FFmpeg demuxer environment options
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+        "fflags;nobuffer|flags;low_delay|max_delay;0|analyzeduration;0|probesize;32"
+    )
+
+    # 2. Try GStreamer hardware acceleration if supported and preferred
+    if config.prefer_hardware_acceleration and hasattr(cv2, "videoio_registry"):
+        try:
+            if cv2.videoio_registry.hasBackend(cv2.CAP_GSTREAMER):
+                gst_pipeline = _build_gstreamer_pipeline(url, config)
+                if gst_pipeline:
+                    cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
+                    if cap and cap.isOpened():
+                        logger.info("IPCamera: GStreamer hardware accelerated pipeline opened: %s", url)
+                        return cap
+                    if cap:
+                        cap.release()
+        except Exception as e:
+            logger.debug("IPCamera: GStreamer open attempt failed: %s; falling back to standard backend", e)
+
+    # 3. Standard OpenCV VideoCapture with low-latency properties
+    cap = cv2.VideoCapture(url)
+    if cap and cap.isOpened():
+        try:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, config.buffer_size)
+        except Exception:
+            pass
+        try:
+            timeout_ms = int(config.timeout_sec * 1000)
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 2000)
+        except Exception:
+            pass
+        return cap
+
+    return None
+
+
 class IPCamera:
     """
-    Dedicated IP / Phone Camera capture worker.
+    Dedicated IP / Phone Camera capture worker with ultra-low latency.
     """
 
     def __init__(self, config: IPCameraConfig):
         self.config = config
         self.url = config.url
         self._cap: Optional[cv2.VideoCapture] = None
-        
-        # Buffer of size 1 ensures zero queued lag
+
+        # Bounded LatestFrameBuffer (size 1) for zero queue lag
+        self._frame_buffer = LatestFrameBuffer(name="ipcam-buffer")
+
+        # Kept for backward compatibility with unit tests
         self._frame_queue: queue.Queue[Tuple[np.ndarray, float]] = queue.Queue(maxsize=2)
-        
+
         self._thread: Optional[threading.Thread] = None
         self._running = False
-        
+
         self._status: str = "disconnected"  # "disconnected" | "connecting" | "connected" | "reconnecting" | "error"
         self._error_message: str = ""
-        
+
         self._actual_fps: float = 0.0
         self._latency_ms: float = 0.0
         self._frame_count: int = 0
         self._fps_timer: float = time.time()
         self._last_frame_time: float = 0.0
-        
+
         self._lock = threading.Lock()
+
+    @property
+    def frame_buffer(self) -> LatestFrameBuffer:
+        return self._frame_buffer
 
     @property
     def status(self) -> str:
@@ -82,13 +162,12 @@ class IPCamera:
         timeout = timeout_sec or self.config.timeout_sec
         self._status = "connecting"
         self._error_message = ""
-        
+
         # Release any existing resources first
         self._stop_internal()
 
-        logger.info("IPCamera: Connecting to %s (timeout=%.1fs)...", self.url, timeout)
+        logger.info("IPCamera: Connecting to %s (timeout=%.1fs, low_latency=True)...", self.url, timeout)
 
-        # Test connection in helper thread with timeout
         connect_success = [False]
         error_msg = [
             f"Connection timed out reaching {self.url}. Ensure: 1) Phone and PC are on the same Wi-Fi network, "
@@ -98,16 +177,8 @@ class IPCamera:
 
         def _try_open():
             try:
-                # OpenCV VideoCapture on URL
-                cap = cv2.VideoCapture(self.url)
+                cap = _open_capture_device(self.url, self.config)
                 if cap and cap.isOpened():
-                    # Set buffer size to 1 for real-time streaming
-                    try:
-                        cap.set(cv2.CAP_PROP_BUFFERSIZE, self.config.buffer_size)
-                    except Exception:
-                        pass
-                    
-                    # Read a test frame to ensure stream is active
                     ret, test_frame = cap.read()
                     if ret and test_frame is not None and test_frame.size > 0:
                         cap_holder[0] = cap
@@ -116,7 +187,7 @@ class IPCamera:
                         cap.release()
                         error_msg[0] = "Camera stream opened but returned no video frames."
                 else:
-                    error_msg[0] = "Unable to connect. Ensure phone and Jetson are on the same network and IP Webcam is running."
+                    error_msg[0] = "Unable to connect. Ensure phone and Jetson/PC are on the same network and IP Webcam is running."
             except Exception as e:
                 error_msg[0] = f"Connection error: {str(e)}"
 
@@ -137,7 +208,7 @@ class IPCamera:
         self._fps_timer = time.time()
         self._frame_count = 0
 
-        # Start persistent capture loop
+        # Start persistent low-latency capture loop
         self._thread = threading.Thread(
             target=self._capture_loop,
             daemon=True,
@@ -149,15 +220,20 @@ class IPCamera:
 
     def read(self) -> Optional[np.ndarray]:
         """
-        Get the latest frame from the camera queue (non-blocking).
+        Get the latest frame from the camera (non-blocking).
         Returns None if no frame is currently available.
         """
-        try:
-            frame, capture_timestamp = self._frame_queue.get_nowait()
-            # Calculate pipeline pickup latency
-            now = time.time()
-            self._latency_ms = max(0.0, (now - capture_timestamp) * 1000.0)
+        # Primary: check LatestFrameBuffer
+        frame, timestamp, _ = self._frame_buffer.get_latest()
+        if frame is not None:
+            self._latency_ms = max(0.0, (time.time() - timestamp) * 1000.0)
             return frame
+
+        # Secondary: fallback to legacy queue (used in unit tests)
+        try:
+            f, t = self._frame_queue.get_nowait()
+            self._latency_ms = max(0.0, (time.time() - t) * 1000.0)
+            return f
         except queue.Empty:
             return None
 
@@ -167,6 +243,15 @@ class IPCamera:
         """
         frame = self.read()
         return frame, self._actual_fps, self._latency_ms
+
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """Return full telemetry metrics for monitoring."""
+        stats = self._frame_buffer.stats
+        stats["status"] = self._status
+        stats["url"] = self.url
+        stats["error"] = self._error_message or None
+        stats["actual_fps"] = self._actual_fps
+        return stats
 
     def stop(self) -> None:
         """Stop capture and release all camera resources."""
@@ -188,6 +273,8 @@ class IPCamera:
                 pass
             self._cap = None
 
+        self._frame_buffer.clear()
+
         # Clear remaining queue items
         while not self._frame_queue.empty():
             try:
@@ -198,7 +285,8 @@ class IPCamera:
     def _capture_loop(self) -> None:
         """
         Background capture loop:
-        Pulls frames continuously, discards older frames, tracks FPS, and handles auto-reconnect.
+        Pulls frames continuously with ZERO sleep delays on live video.
+        Drains network socket immediately, replaces stale frames, and computes FPS.
         """
         reconnect_attempts = 0
 
@@ -213,16 +301,15 @@ class IPCamera:
             ret, frame = self._cap.read()
 
             if not ret or frame is None or frame.size == 0:
-                logger.warning("IPCamera: Dropped frame from stream: %s", self.url)
-                # Check for stream timeout
-                if time.time() - self._last_frame_time > 5.0:
+                # Frame dropped or interrupted
+                if time.time() - self._last_frame_time > 4.0:
                     self._status = "reconnecting"
                     self._error_message = "Stream interrupted. Reconnecting..."
                     if not self._handle_reconnect(reconnect_attempts):
                         break
                     reconnect_attempts += 1
                 else:
-                    time.sleep(0.02)
+                    time.sleep(0.01)
                 continue
 
             # Frame successfully acquired
@@ -236,14 +323,15 @@ class IPCamera:
             if (target_w > 0 and target_h > 0) and (fw != target_w or fh != target_h):
                 frame = cv2.resize(frame, (target_w, target_h))
 
-            # Push newest frame to queue; drop stale frame if full
+            # Push newest frame to LatestFrameBuffer (drops stale frame instantly)
+            self._frame_buffer.push(frame, t_capture)
+
+            # Maintain queue for legacy tests
             try:
                 if self._frame_queue.full():
                     self._frame_queue.get_nowait()
                 self._frame_queue.put_nowait((frame, t_capture))
-            except queue.Empty:
-                pass
-            except Exception:
+            except (queue.Empty, queue.Full):
                 pass
 
             # FPS calculation
@@ -255,13 +343,9 @@ class IPCamera:
                 self._frame_count = 0
                 self._fps_timer = now
 
-            # Sleep tiny interval if camera is pushing faster than target fps
-            if self.config.target_fps > 0:
-                min_interval = 1.0 / self.config.target_fps
-                processing_time = time.time() - t_capture
-                sleep_time = min_interval - processing_time
-                if sleep_time > 0.005:
-                    time.sleep(sleep_time)
+            # NOTE: We DO NOT time.sleep() here!
+            # Network camera streams (RTSP / HTTP) push at camera frame rate.
+            # Reading continuously drains the socket buffer and ensures lowest latency.
 
     def _handle_reconnect(self, attempt: int) -> bool:
         """Attempt reconnection with backoff up to max attempts."""
@@ -282,20 +366,16 @@ class IPCamera:
                 pass
             self._cap = None
 
-        time.sleep(min(self.config.reconnect_interval_sec * (1.2 ** attempt), 10.0))
+        time.sleep(min(self.config.reconnect_interval_sec * (1.2 ** attempt), 8.0))
 
         if not self._running:
             return False
 
         try:
-            cap = cv2.VideoCapture(self.url)
+            cap = _open_capture_device(self.url, self.config)
             if cap and cap.isOpened():
-                try:
-                    cap.set(cv2.CAP_PROP_BUFFERSIZE, self.config.buffer_size)
-                except Exception:
-                    pass
                 ret, test_frame = cap.read()
-                if ret and test_frame is not None:
+                if ret and test_frame is not None and test_frame.size > 0:
                     self._cap = cap
                     self._status = "connected"
                     self._error_message = ""

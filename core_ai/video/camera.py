@@ -1,13 +1,13 @@
 """
 ORBITA Camera Module
 ====================
-Manages video capture from webcam, video file, or simulator.
+Manages video capture from webcam, CSI/USB cameras, video files, or simulator.
 
-Provides a thread-safe frame queue so the AI pipeline never blocks
-waiting for a new frame, and frames are never dropped in the queue.
+Provides low-latency single-frame buffer (bounded size=1) so the pipeline
+never blocks waiting for a frame, and old frames are automatically dropped.
 
 Supports:
-  - Webcam (index integer)
+  - Webcam / CSI / USB (index integer or path)
   - Video file (path string)
   - Simulator frames (injected externally via push_frame)
 """
@@ -18,17 +18,19 @@ import logging
 import queue
 import threading
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
+
+from core_ai.video.frame_buffer import LatestFrameBuffer
 
 logger = logging.getLogger(__name__)
 
 
 class Camera:
     """
-    Video frame producer.
+    Video frame producer with zero-latency bounded buffering.
 
     Usage:
         cam = Camera(config)
@@ -40,13 +42,14 @@ class Camera:
     def __init__(self, config):
         self.config = config
         self.source = config.source
-        self.width = config.width
-        self.height = config.height
-        self.fps_target = config.fps
-        self.flip = config.flip
+        self.width = getattr(config, "width", 1280)
+        self.height = getattr(config, "height", 720)
+        self.fps_target = getattr(config, "fps", 30)
+        self.flip = getattr(config, "flip", False)
 
         self._cap: Optional[cv2.VideoCapture] = None
-        self._frame_queue: queue.Queue[Optional[np.ndarray]] = queue.Queue(maxsize=4)
+        self._frame_buffer = LatestFrameBuffer(name="local-cam-buffer")
+        self._frame_queue: queue.Queue[Optional[np.ndarray]] = queue.Queue(maxsize=2)
         self._thread: Optional[threading.Thread] = None
         self._running = False
         self._is_simulator = False  # Set True when using push_frame
@@ -54,6 +57,11 @@ class Camera:
         self._actual_fps: float = 0.0
         self._frame_count: int = 0
         self._fps_timer: float = time.time()
+        self._latency_ms: float = 0.0
+
+    @property
+    def frame_buffer(self) -> LatestFrameBuffer:
+        return self._frame_buffer
 
     # ----------------------------------------------------------------------- #
     # Public API
@@ -76,6 +84,10 @@ class Camera:
             self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             self._cap.set(cv2.CAP_PROP_FPS, self.fps_target)
+            try:
+                self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
 
             self._running = True
             self._thread = threading.Thread(
@@ -91,20 +103,32 @@ class Camera:
 
     def read(self) -> Optional[np.ndarray]:
         """Get latest frame (non-blocking). Returns None if no frame available."""
+        frame, ts, _ = self._frame_buffer.get_latest()
+        if frame is not None:
+            self._latency_ms = max(0.0, (time.time() - ts) * 1000.0)
+            return frame
+
         try:
             return self._frame_queue.get_nowait()
         except queue.Empty:
             return None
 
+    def read_with_metadata(self) -> Tuple[Optional[np.ndarray], float, float]:
+        """Returns (frame, actual_fps, latency_ms)."""
+        frame = self.read()
+        return frame, self._actual_fps, self._latency_ms
+
     def push_frame(self, frame: np.ndarray) -> None:
-        """Push a simulator-generated frame into the queue."""
+        """Push an externally generated frame into the buffer."""
         if not self._running:
             return
+        t = time.time()
+        self._frame_buffer.push(frame, t)
         try:
             if self._frame_queue.full():
                 self._frame_queue.get_nowait()
             self._frame_queue.put_nowait(frame.copy())
-        except queue.Empty:
+        except (queue.Empty, queue.Full):
             pass
 
     def stop(self) -> None:
@@ -113,6 +137,8 @@ class Camera:
             self._thread.join(timeout=2.0)
         if self._cap is not None:
             self._cap.release()
+            self._cap = None
+        self._frame_buffer.clear()
         logger.info("Camera stopped.")
 
     def is_running(self) -> bool:
@@ -122,11 +148,14 @@ class Camera:
     def actual_fps(self) -> float:
         return self._actual_fps
 
+    @property
+    def latency_ms(self) -> float:
+        return self._latency_ms
+
     # ----------------------------------------------------------------------- #
     # Capture loop (background thread)
     # ----------------------------------------------------------------------- #
     def _capture_loop(self) -> None:
-        frame_interval = 1.0 / max(self.fps_target, 1)
         while self._running and self._cap is not None:
             t0 = time.time()
             ret, frame = self._cap.read()
@@ -135,7 +164,7 @@ class Camera:
                     self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 logger.warning("Camera read failed.")
-                time.sleep(0.1)
+                time.sleep(0.05)
                 continue
 
             if self.flip:
@@ -146,12 +175,15 @@ class Camera:
             if fw != self.width or fh != self.height:
                 frame = cv2.resize(frame, (self.width, self.height))
 
-            # Non-blocking queue put (drop oldest if full)
+            # Store in LatestFrameBuffer (drops old frame instantly)
+            self._frame_buffer.push(frame, t0)
+
+            # Mirror to queue for backward compatibility
             try:
                 if self._frame_queue.full():
                     self._frame_queue.get_nowait()
                 self._frame_queue.put_nowait(frame)
-            except queue.Empty:
+            except (queue.Empty, queue.Full):
                 pass
 
             # FPS tracking
@@ -161,9 +193,3 @@ class Camera:
                 self._actual_fps = self._frame_count / elapsed
                 self._frame_count = 0
                 self._fps_timer = time.time()
-
-            # Regulate frame rate
-            processing_time = time.time() - t0
-            sleep_time = frame_interval - processing_time
-            if sleep_time > 0:
-                time.sleep(sleep_time)

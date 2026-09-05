@@ -30,10 +30,16 @@ EXPERIMENTS_DIR.mkdir(exist_ok=True)
 @dataclass
 class CameraConfig:
     source: str | int = 0           # 0 = default webcam, path = video file
-    width: int = 640
-    height: int = 480
+    width: int = 1280
+    height: int = 720
     fps: int = 30
     flip: bool = False              # Flip horizontal for mirror-mode demos
+    buffer_size: int = 1
+    jpeg_quality: int = 70
+    drop_old_frames: bool = True
+    prefer_hardware_acceleration: bool = True
+    low_latency: bool = True
+    ai_fps: int = 15
 
 
 # --------------------------------------------------------------------------- #
@@ -127,6 +133,9 @@ class VideoConfig:
     output_dir: str = str(EXPERIMENTS_DIR)
     fourcc: str = "mp4v"
     stream_port: int = 8080         # Local MJPEG stream port (separate from API)
+    jpeg_quality: int = 70
+    drop_old_frames: bool = True
+    low_latency: bool = True
 
 
 # --------------------------------------------------------------------------- #

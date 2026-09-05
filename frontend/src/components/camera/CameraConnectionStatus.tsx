@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 
 interface CameraConnectionStatusProps {
-  status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' | 'error';
+  status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' | 'waiting' | 'error';
   error?: string | null;
   className?: string;
 }
@@ -18,6 +18,12 @@ export default function CameraConnectionStatus({
           dotClass: 'bg-status-success shadow-[0_0_8px_rgba(76,175,125,0.6)]',
           textClass: 'text-status-success',
           label: 'Connected',
+        };
+      case 'waiting':
+        return {
+          dotClass: 'bg-accent-cyan animate-pulse shadow-[0_0_8px_rgba(56,189,248,0.6)]',
+          textClass: 'text-accent-cyan',
+          label: 'Ready to Pair',
         };
       case 'connecting':
         return {
