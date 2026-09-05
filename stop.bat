@@ -8,11 +8,11 @@ echo                Stopping ORBITA Services...
 echo =====================================================================
 echo.
 
-powershell -NoProfile -Command "Get-Process -Id (Get-NetTCPConnection -LocalPort 8000,5173,5174 -State Listen -ErrorAction SilentlyContinue).OwningProcess -ErrorAction SilentlyContinue | Stop-Process -Force"
+powershell -NoProfile -Command "$ports = @(8000, 5173, 5174); $pids = (Get-NetTCPConnection -LocalPort $ports -State Listen -ErrorAction SilentlyContinue).OwningProcess; if ($pids) { Get-Process -Id $pids -ErrorAction SilentlyContinue | Stop-Process -Force }" 2>nul
 
 echo.
 echo =====================================================================
 echo                    ORBITA Services Stopped.
 echo =====================================================================
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 2 >nul
 exit /b 0
