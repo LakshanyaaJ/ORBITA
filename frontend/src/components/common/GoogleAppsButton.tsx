@@ -19,12 +19,12 @@ export default function GoogleAppsButton({
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
         aria-label="Launch ORBITA Mission Control"
-        title="ORBITA Mission Control (orbita-mission-control)"
-        className={`group relative flex items-center justify-center w-9 h-9 rounded-full text-space-400 hover:text-accent-cyan hover:bg-space-700 active:bg-space-600 transition-all duration-150 border border-transparent hover:border-space-600 focus:outline-none focus:ring-2 focus:ring-accent-cyan/50 ${className}`}
+        title="ORBITA Mission Control"
+        className={`group relative flex items-center justify-center w-8 h-8 rounded-md text-space-400 hover:text-accent-cyan hover:bg-space-700 active:bg-space-600 transition-all duration-150 border border-transparent hover:border-space-600 focus:outline-none focus:ring-2 focus:ring-accent-cyan/30 ${className}`}
       >
         {/* 3x3 Google Apps / Waffle Icon */}
         <svg
-          className="w-5 h-5 transition-transform duration-200 group-hover:scale-110"
+          className="w-4.5 h-4.5 transition-transform duration-200 group-hover:scale-110"
           viewBox="0 0 24 24"
           fill="currentColor"
           xmlns="http://www.w3.org/2000/svg"
@@ -46,9 +46,9 @@ export default function GoogleAppsButton({
 
       {/* Floating Tooltip */}
       {showTooltip && (
-        <div className="absolute right-0 top-full mt-2 z-50 pointer-events-none whitespace-nowrap px-3 py-1.5 rounded bg-space-800 border border-space-600 shadow-xl text-xs font-mono text-space-100 flex items-center gap-2 animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute right-0 top-full mt-2 z-50 pointer-events-none whitespace-nowrap px-3 py-1.5 rounded-md bg-space-800 border border-space-600 shadow-md text-xs font-mono text-space-100 flex items-center gap-2 animate-in fade-in zoom-in-95 duration-100">
           <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-pulse"></span>
-          <span>ORBITA Mission Control</span>
+          <span className="font-medium text-space-100">ORBITA Mission Control</span>
           <span className="text-space-400 text-[10px]">(/mission-control)</span>
         </div>
       )}

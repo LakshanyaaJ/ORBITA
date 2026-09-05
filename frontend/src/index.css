@@ -1,20 +1,23 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --color-space-900: #0B1118;
-  --color-space-800: #111A23;
-  --color-space-700: #17222D;
-  --color-space-600: #273542;
-  --color-space-100: #F2F5F7;
-  --color-space-400: #94A3AF;
+  /* Aerospace Light Theme - matching Mission Control */
+  --color-space-900: #f4f6f7;        /* Clean light canvas */
+  --color-space-800: #ffffff;        /* Pure white cards & topbar */
+  --color-space-700: #edf2f5;        /* Subtle hover / secondary pill */
+  --color-space-600: #dfe5e8;        /* Clean structural border */
+  --color-space-100: #1c2a33;        /* Dark slate high-contrast typography */
+  --color-space-400: #73818a;        /* Muted slate labels & meta text */
   
-  --color-accent-cyan: #5BB8D4;
-  --color-status-success: #4CAF7D;
-  --color-status-warning: #D6A84F;
-  --color-status-critical: #D96565;
+  --color-accent-cyan: #2f6f9f;       /* Mission Control primary slate-blue */
+  --color-status-success: #2e7d58;    /* Natural verified emerald */
+  --color-status-warning: #b8772a;    /* Controlled telemetry amber */
+  --color-status-critical: #b44d4d;   /* Soft alert rose */
   
-  --font-sans: 'Inter', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'DM Mono', monospace;
+  --font-space: 'Space Grotesk', sans-serif;
 }
 
 @layer base {
@@ -25,5 +28,9 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     margin: 0;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', var(--font-sans);
   }
 }
