@@ -153,12 +153,12 @@ export default function PhoneCameraQRModal({
                   Retry
                 </button>
               </div>
-            ) : (
+            ) : loading || !qrDataUrl ? (
               <div className="w-56 h-56 flex flex-col items-center justify-center text-space-900 font-mono text-xs gap-2">
                 <RefreshCw size={20} className="animate-spin text-space-600" />
                 <span>Generating QR...</span>
               </div>
-            )}
+            ) : null}
 
             {/* Connected Overlay Badge */}
             {pairingInfo?.connected && (
