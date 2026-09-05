@@ -2,6 +2,8 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Activity, Cpu, Settings, ArrowLeft } from 'lucide-react';
 import clsx from 'clsx';
 
+import GoogleAppsButton from './GoogleAppsButton';
+
 export default function PageShell() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -55,7 +57,7 @@ export default function PageShell() {
           )}
         </div>
 
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-5">
           {/* Status Indicators */}
           <div className="flex items-center gap-4 text-xs font-mono font-bold tracking-widest">
             <StatusIndicator label="AI" active={true} color="bg-status-success" />
@@ -63,12 +65,17 @@ export default function PageShell() {
             <StatusIndicator label="STREAM" active={true} color="bg-status-success" />
           </div>
 
-          <div className="w-px h-6 bg-space-600 mx-2"></div>
+          <div className="w-px h-6 bg-space-600 mx-1"></div>
           
           {/* Clock */}
           <div className="font-mono text-space-400 text-sm">
             {new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
           </div>
+
+          <div className="w-px h-6 bg-space-600 mx-1"></div>
+
+          {/* Google Apps Icon Launcher */}
+          <GoogleAppsButton />
         </div>
       </header>
 

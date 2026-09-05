@@ -2,12 +2,16 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTelemetry } from '../api/telemetry';
 import clsx from 'clsx';
-import { AlertTriangle, CheckCircle, Activity } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Activity, Video } from 'lucide-react';
+import CameraControlPanel from '../components/camera/CameraControlPanel';
+import type { CameraStatus } from '../api/camera';
 
 export default function LiveExperiment() {
   const { id } = useParams();
   const { data, isConnected } = useTelemetry();
   const [videoError, setVideoError] = useState(false);
+  const [streamVersion, setStreamVersion] = useState(Date.now());
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
 
   // Fallback to simulated data if backend is not emitting or not connected
   // Normally we would use a true mock hook, but this keeps the component resilient.
@@ -17,6 +21,28 @@ export default function LiveExperiment() {
   const isCritical = state.alert_level === 'error';
   const isWarning = state.alert_level === 'warning';
   const isSuccess = state.alert_level === 'success';
+
+  const handleCameraChange = (status: CameraStatus) => {
+    setCameraStatus(status);
+    if (status.connected && videoError) {
+      setVideoError(false);
+      setStreamVersion(Date.now());
+    }
+  };
+
+  const getSourceLabel = () => {
+    if (!cameraStatus) return 'CAM-01';
+    switch (cameraStatus.source) {
+      case 'ip_camera':
+        return 'PHONE IP CAM';
+      case 'jetson_camera':
+        return 'JETSON CAM';
+      case 'sim':
+        return 'SIM FEED';
+      default:
+        return 'CAM-01';
+    }
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -45,7 +71,7 @@ export default function LiveExperiment() {
       {/* Main Grid */}
       <div className="flex-1 grid grid-cols-1 xl:grid-cols-4 min-h-0">
         
-        {/* Left Column: Video Feed */}
+        {/* Left Column: Video Feed & Camera Controls */}
         <div className="xl:col-span-3 flex flex-col border-r border-space-600 bg-black relative">
           <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
             <span className={clsx(
@@ -54,30 +80,45 @@ export default function LiveExperiment() {
             )}>
               {isConnected ? 'TELEMETRY LIVE' : 'TELEMETRY OFFLINE'}
             </span>
-            {!videoError && (
-              <span className="font-mono text-xs font-bold tracking-widest px-2 py-1 rounded bg-accent-cyan/80 text-space-900">
-                CAM-01
-              </span>
-            )}
+            <span className="font-mono text-xs font-bold tracking-widest px-2 py-1 rounded bg-accent-cyan/80 text-space-900 flex items-center gap-1.5">
+              <Video size={12} />
+              {getSourceLabel()}
+            </span>
           </div>
 
-          <div className="flex-1 relative flex items-center justify-center overflow-hidden">
+          <div className="flex-1 relative flex items-center justify-center overflow-hidden bg-space-900/60">
             {!videoError ? (
               <img 
-                src="http://localhost:8000/video_feed" 
+                key={streamVersion}
+                src={`http://localhost:8000/video_feed?v=${streamVersion}`} 
                 alt="Live Camera Feed"
                 className="w-full h-full object-contain"
                 onError={() => setVideoError(true)}
               />
             ) : (
-              <div className="flex flex-col items-center justify-center text-status-critical gap-4">
+              <div className="flex flex-col items-center justify-center text-status-critical gap-4 p-8 text-center">
                 <AlertTriangle size={48} />
                 <div className="font-mono font-bold tracking-widest text-xl">CAMERA CONNECTION LOST</div>
-                <div className="text-space-400 font-mono text-sm">Attempting to reconnect...</div>
+                <div className="text-space-400 font-mono text-sm max-w-md">
+                  Unable to display camera feed. Verify camera connection settings below.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVideoError(false);
+                    setStreamVersion(Date.now());
+                  }}
+                  className="mt-2 px-4 py-1.5 bg-space-800 border border-space-600 hover:border-accent-cyan text-accent-cyan font-mono text-xs font-bold rounded transition-colors"
+                >
+                  RETRY STREAM
+                </button>
               </div>
             )}
+          </div>
 
-            {/* Simulated bounding boxes/AI overlays could go here if we received raw coordinates */}
+          {/* Integrated Camera Source & Settings Control Dock */}
+          <div className="p-3 border-t border-space-600 bg-space-900/95">
+            <CameraControlPanel onCameraChange={handleCameraChange} />
           </div>
         </div>
 

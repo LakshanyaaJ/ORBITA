@@ -7,6 +7,7 @@ import LiveExperiment from './pages/LiveExperiment';
 import ExperimentLog from './pages/ExperimentLog';
 import SystemDiagnostics from './pages/SystemDiagnostics';
 import PageShell from './components/common/PageShell';
+import MissionControlPage from './mission-control/pages/Home';
 
 function App() {
   return (
@@ -23,6 +24,10 @@ function App() {
           <Route path="/experiments/:id/log" element={<ExperimentLog />} />
           <Route path="/system" element={<SystemDiagnostics />} />
         </Route>
+        
+        {/* Unified Mission Control Route */}
+        <Route path="/mission-control" element={<MissionControlPage />} />
+        <Route path="/orbita-mission-control" element={<Navigate to="/mission-control" replace />} />
         
         <Route path="*" element={<Navigate to="/auth" replace />} />
       </Routes>

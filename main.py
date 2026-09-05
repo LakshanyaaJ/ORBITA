@@ -21,6 +21,12 @@ import logging
 import sys
 import time
 
+try:
+    import orbita
+except ModuleNotFoundError:
+    import ORBITA as orbita
+    sys.modules["orbita"] = orbita
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s — %(message)s",

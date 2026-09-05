@@ -24,6 +24,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
+import cv2
+import numpy as np
 import psutil
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +44,12 @@ from orbita.perception.pose_estimator import PoseEstimator
 from orbita.reasoning.state_manager import StateManager, ValidationResult
 from orbita.simulation.simulator import ExperimentSimulator, Scenario
 from orbita.video.camera import Camera
+from orbita.video.camera_config import (
+    IPCameraConfig,
+    get_default_ip_camera_url,
+    validate_and_format_camera_url,
+)
+from orbita.video.camera_manager import CameraManager
 from orbita.video.recorder import VideoRecorder
 from orbita.video.streamer import MJPEGStreamer
 from orbita.voice.tts import TTSEngine
@@ -56,7 +64,8 @@ class AppState:
         self.config: Optional[OrbitaConfig] = None
         self.ws_manager = WebSocketManager()
         self.streamer = MJPEGStreamer()
-        self.camera: Optional[Camera] = None
+        self.camera_manager: Optional[CameraManager] = None
+        self._camera_legacy: Optional[Camera] = None
         self.recorder: Optional[VideoRecorder] = None
         self.tts: Optional[TTSEngine] = None
         self.detector: Optional[ObjectDetector] = None
@@ -71,12 +80,24 @@ class AppState:
         self.pipeline_task: Optional[asyncio.Task] = None
 
         self.current_scenario: str = "A"
-        self.mode: str = "sim"          # "sim" | "webcam"
+        self.mode: str = "sim"          # "sim" | "webcam" | "ip_camera"
         self.is_running: bool = False
         self.pipeline_fps: float = 0.0
         self.last_result: Optional[ValidationResult] = None
         self.frame_count: int = 0
         self._fps_timer: float = time.time()
+
+    @property
+    def camera(self) -> Optional[Camera]:
+        if self.camera_manager:
+            return self.camera_manager._jetson_camera
+        return self._camera_legacy
+
+    @camera.setter
+    def camera(self, cam: Optional[Camera]):
+        self._camera_legacy = cam
+        if self.camera_manager and cam:
+            self.camera_manager._jetson_camera = cam
 
 
 _state = AppState()
@@ -114,6 +135,17 @@ async def _startup() -> None:
     _state.state_manager = StateManager(cfg, on_voice=on_voice)
     _state.simulator = ExperimentSimulator(Scenario.A)
 
+    # Initialize CameraManager
+    _state.camera_manager = CameraManager(cfg.camera if cfg else None)
+    if _state.mode == "webcam":
+        _state.camera_manager.connect_jetson_camera(0)
+    elif _state.mode == "ip_camera":
+        default_url = get_default_ip_camera_url()
+        if default_url:
+            _state.camera_manager.connect_ip_camera(url=default_url)
+    else:
+        _state.camera_manager.set_simulation_mode()
+
     # Initialize experiment logger
     _state.experiment_logger = ExperimentLogger(
         experiment_id=_state.state_manager.experiment_id,
@@ -132,8 +164,10 @@ async def _shutdown() -> None:
     _state.is_running = False
     if _state.pipeline_task:
         _state.pipeline_task.cancel()
-    if _state.camera:
-        _state.camera.stop()
+    if _state.camera_manager:
+        _state.camera_manager.disconnect()
+    if _state._camera_legacy:
+        _state._camera_legacy.stop()
     if _state.recorder:
         _state.recorder.stop()
     if _state.tts:
@@ -164,7 +198,16 @@ async def _process_frame() -> None:
 
     # --- 1. Acquire frame ---
     frame = None
-    if _state.mode == "sim" and _state.simulator:
+    objects = []
+    poses = []
+    left = None
+    right = None
+    cam_name = ""
+    latency_ms = 0.0
+
+    active_source = _state.camera_manager.active_source if _state.camera_manager else _state.mode
+
+    if active_source == "sim" and _state.simulator:
         sim_frame = _state.simulator.next_frame()
         frame = sim_frame.image
 
@@ -187,27 +230,66 @@ async def _process_frame() -> None:
             target_object=obj,
         )
 
+    elif _state.camera_manager and active_source in ("jetson_camera", "ip_camera"):
+        frame, cam_fps, cam_latency = _state.camera_manager.read_with_metadata()
+        latency_ms = cam_latency
+        cam_name = "Phone IP Camera" if active_source == "ip_camera" else "Jetson Camera"
+
+        if frame is None:
+            # If camera is connecting or disconnected, update status frame on streamer
+            cam_stat = _state.camera_manager.get_status()
+            if cam_stat.get("status") in ("connecting", "reconnecting", "error"):
+                _show_camera_status_frame(cam_stat.get("status", ""), cam_stat.get("error"))
+            return
+
+        t_stamp = time.time()
+
+        # --- 2. Perception ---
+        objects = _state.detector.detect(frame, t_stamp) if _state.detector else []
+        poses = _state.pose.estimate(frame, t_stamp) if _state.pose else []
+        pose = poses[0] if poses else None
+        left, right = _state.hand_tracker.track(pose, frame, t_stamp) if _state.hand_tracker else (None, None)
+        interactions = _state.interaction_tracker.update(left, right, objects, t_stamp) if _state.interaction_tracker else []
+
+        # --- 3. Feature fusion ---
+        fv = build_feature_vector(pose, left, right, objects, interactions, frame.shape[:2])
+        if _state.feature_window:
+            _state.feature_window.push(fv)
+            window = _state.feature_window.get_window()
+        else:
+            window = np.zeros((30, 64), dtype=np.float32)
+
+        # --- 4. Action classification ---
+        prediction = _state.classifier.predict(window) if _state.classifier else ActionPrediction(
+            action="IDLE", confidence=0.5, next_action="IDLE", next_confidence=0.3, is_uncertain=False, target_object=""
+        )
+        obj = ""
+
     elif _state.camera:
         frame = _state.camera.read()
         if frame is None:
             return
 
         t_stamp = time.time()
+        cam_name = "Jetson Camera"
 
-        # --- 2. Perception ---
-        objects = _state.detector.detect(frame, t_stamp)
-        poses = _state.pose.estimate(frame, t_stamp)
+        # Perception
+        objects = _state.detector.detect(frame, t_stamp) if _state.detector else []
+        poses = _state.pose.estimate(frame, t_stamp) if _state.pose else []
         pose = poses[0] if poses else None
-        left, right = _state.hand_tracker.track(pose, frame, t_stamp)
-        interactions = _state.interaction_tracker.update(left, right, objects, t_stamp)
+        left, right = _state.hand_tracker.track(pose, frame, t_stamp) if _state.hand_tracker else (None, None)
+        interactions = _state.interaction_tracker.update(left, right, objects, t_stamp) if _state.interaction_tracker else []
 
-        # --- 3. Feature fusion ---
         fv = build_feature_vector(pose, left, right, objects, interactions, frame.shape[:2])
-        _state.feature_window.push(fv)
-        window = _state.feature_window.get_window()
+        if _state.feature_window:
+            _state.feature_window.push(fv)
+            window = _state.feature_window.get_window()
+        else:
+            window = np.zeros((30, 64), dtype=np.float32)
 
-        # --- 4. Action classification ---
-        prediction = _state.classifier.predict(window)
+        prediction = _state.classifier.predict(window) if _state.classifier else ActionPrediction(
+            action="IDLE", confidence=0.5, next_action="IDLE", next_confidence=0.3, is_uncertain=False, target_object=""
+        )
         obj = ""
 
     else:
@@ -215,18 +297,16 @@ async def _process_frame() -> None:
 
     # --- 5. Procedural reasoning ---
     if _state.state_manager:
-        detected_obj = ""
-        if _state.mode != "sim":
-            from orbita.reasoning.state_manager import StateManager
+        if active_source != "sim":
             detected_obj = _state.state_manager._resolve_object(prediction, objects)
         else:
             detected_obj = obj
 
         result = _state.state_manager.process(
             prediction,
-            objects if 'objects' in dir() else [],
+            objects,
             fps=_state.pipeline_fps,
-            latency_ms=(time.time() - t0) * 1000,
+            latency_ms=((time.time() - t0) * 1000) + latency_ms,
         )
         _state.last_result = result
 
@@ -236,7 +316,16 @@ async def _process_frame() -> None:
 
     # --- 6. Annotate frame ---
     if frame is not None:
-        annotated = _annotate_frame(frame, result if _state.last_result else None)
+        annotated = _annotate_frame(
+            frame=frame,
+            result=result if _state.last_result else None,
+            objects=objects,
+            poses=poses,
+            left_hand=left,
+            right_hand=right,
+            camera_name=cam_name,
+            latency_ms=latency_ms,
+        )
         _state.streamer.update(annotated)
 
         # Write to recorder
@@ -256,12 +345,42 @@ async def _process_frame() -> None:
         _state._fps_timer = time.time()
 
 
-def _annotate_frame(frame, result: Optional[ValidationResult]):
-    """Draw all AI overlays on frame."""
+def _annotate_frame(
+    frame: np.ndarray,
+    result: Optional[ValidationResult] = None,
+    objects: Optional[list] = None,
+    poses: Optional[list] = None,
+    left_hand: Optional[Any] = None,
+    right_hand: Optional[Any] = None,
+    camera_name: str = "",
+    latency_ms: float = 0.0,
+) -> np.ndarray:
+    """Draw all AI overlays (bboxes, pose, hands, HUD banner) on frame."""
     import cv2
     vis = frame.copy()
 
-    # Status banner
+    # 1. Draw detected objects (YOLO / chroma)
+    if objects and _state.detector:
+        try:
+            vis = _state.detector.draw(vis, objects)
+        except Exception:
+            pass
+
+    # 2. Draw pose skeleton
+    if poses and _state.pose:
+        try:
+            vis = _state.pose.draw(vis, poses)
+        except Exception:
+            pass
+
+    # 3. Draw hand points
+    if (left_hand or right_hand) and _state.hand_tracker:
+        try:
+            vis = _state.hand_tracker.draw(vis, left_hand, right_hand)
+        except Exception:
+            pass
+
+    # 4. Status banner
     status_colors = {
         "success": (0, 200, 80),
         "error": (0, 60, 220),
@@ -272,15 +391,51 @@ def _annotate_frame(frame, result: Optional[ValidationResult]):
         alert_level = result.alert_level
         colour = status_colors.get(alert_level, (180, 180, 180))
         cv2.rectangle(vis, (0, 0), (vis.shape[1], 32), (10, 15, 25), -1)
-        cv2.putText(vis, result.hud_message[:60], (10, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, colour, 1, cv2.LINE_AA)
+        hud_txt = result.hud_message[:55]
+        cv2.putText(vis, hud_txt, (10, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.52, colour, 1, cv2.LINE_AA)
 
-        # FPS
+        # FPS & latency tag
         fps_text = f"{_state.pipeline_fps:.1f} FPS"
-        cv2.putText(vis, fps_text, (vis.shape[1] - 90, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 180, 100), 1, cv2.LINE_AA)
+        if latency_ms > 0:
+            fps_text = f"{latency_ms:.0f}ms | {fps_text}"
+        cv2.putText(vis, fps_text, (vis.shape[1] - 145, 22),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (100, 220, 140), 1, cv2.LINE_AA)
+
+    # 5. Bottom camera badge for live cameras
+    if camera_name:
+        h, w = vis.shape[:2]
+        badge_text = f"SOURCE: {camera_name}"
+        cv2.rectangle(vis, (0, h - 22), (w, h), (10, 15, 25), -1)
+        cv2.putText(vis, badge_text, (10, h - 7),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, (90, 180, 230), 1, cv2.LINE_AA)
 
     return vis
+
+
+def _show_camera_status_frame(status: str, error_msg: Optional[str] = None):
+    """Update stream with placeholder when camera is connecting or experiencing an error."""
+    import cv2
+    blank = np.zeros((480, 640, 3), dtype=np.uint8)
+    # Background pattern
+    cv2.rectangle(blank, (0, 0), (640, 480), (12, 17, 24), -1)
+    
+    if status in ("connecting", "reconnecting"):
+        msg = "CAMERA CONNECTING..." if status == "connecting" else "RECONNECTING TO PHONE CAMERA..."
+        sub = "Establishing network stream..."
+        col = (60, 190, 240)
+    elif status == "error":
+        msg = "CAMERA CONNECTION ERROR"
+        sub = error_msg or "Unable to reach IP camera. Check network and IP."
+        col = (80, 80, 240)
+    else:
+        msg = "CAMERA DISCONNECTED"
+        sub = "Select a camera source to start streaming."
+        col = (140, 150, 160)
+
+    cv2.putText(blank, msg, (60, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.75, col, 2, cv2.LINE_AA)
+    cv2.putText(blank, sub[:70], (60, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 170, 180), 1, cv2.LINE_AA)
+    _state.streamer.update(blank)
 
 
 # =========================================================================== #
@@ -369,16 +524,100 @@ async def control(body: dict):
     if action == "set_mode":
         new_mode = body.get("mode", "sim")
         _state.mode = new_mode
-        if new_mode == "webcam":
-            if _state.camera is None:
-                cfg = _state.config
-                if cfg:
-                    cam = Camera(cfg.camera)
-                    if cam.start():
-                        _state.camera = cam
+        if _state.camera_manager:
+            if new_mode == "webcam":
+                _state.camera_manager.connect_jetson_camera(0)
+            elif new_mode == "sim":
+                _state.camera_manager.set_simulation_mode()
         return {"status": f"mode_{new_mode}"}
 
     return {"status": "unknown_action"}
+
+
+# =========================================================================== #
+# Camera Management Endpoints
+# =========================================================================== #
+@app.post("/api/camera/connect")
+async def camera_connect(body: dict):
+    """
+    Connect to a camera source:
+      - Jetson / Local camera: {"source": "jetson_camera", "device_index": 0}
+      - Phone IP Camera: {"source": "ip_camera", "url": "http://...", "ip": "...", "port": 8080, "path": "/video"}
+      - Simulation: {"source": "sim"}
+    """
+    if not _state.camera_manager:
+        return JSONResponse(status_code=500, content={"status": "error", "error": "CameraManager not initialized."})
+
+    source = body.get("source", "ip_camera")
+
+    if source == "jetson_camera":
+        device_index = int(body.get("device_index", 0))
+        success, err = _state.camera_manager.connect_jetson_camera(device_index)
+        if not success:
+            return JSONResponse(status_code=400, content={"status": "error", "error": err})
+        _state.mode = "webcam"
+        return {"status": "connected", "source": "jetson_camera", "device_index": device_index}
+
+    elif source == "ip_camera":
+        url = body.get("url")
+        ip = body.get("ip")
+        port = body.get("port")
+        path = body.get("path")
+        timeout_sec = float(body.get("timeout_sec", 4.0))
+
+        success, err = _state.camera_manager.connect_ip_camera(
+            url=url, ip=ip, port=port, path=path, timeout_sec=timeout_sec
+        )
+        if not success:
+            return JSONResponse(status_code=400, content={"status": "error", "error": err})
+        _state.mode = "ip_camera"
+        return {
+            "status": "connected",
+            "source": "ip_camera",
+            "url": _state.camera_manager.active_url,
+        }
+
+    elif source == "sim":
+        _state.camera_manager.set_simulation_mode()
+        _state.mode = "sim"
+        return {"status": "connected", "source": "sim"}
+
+    return JSONResponse(status_code=400, content={"status": "error", "error": f"Unknown camera source: '{source}'."})
+
+
+@app.post("/api/camera/disconnect")
+async def camera_disconnect():
+    """Disconnect the active camera and return to standby."""
+    if _state.camera_manager:
+        _state.camera_manager.disconnect()
+    _state.mode = "disconnected"
+    _show_camera_status_frame("disconnected")
+    return {"status": "disconnected"}
+
+
+@app.get("/api/camera/status")
+async def camera_status():
+    """Get active camera connection state, FPS, and latency metrics."""
+    if _state.camera_manager:
+        return _state.camera_manager.get_status()
+    return {
+        "connected": False,
+        "source": "none",
+        "url": "",
+        "fps": 0.0,
+        "latency_ms": 0.0,
+        "status": "disconnected",
+        "error": None,
+    }
+
+
+@app.get("/api/camera/stream")
+async def camera_stream():
+    """Alias for /video_feed to provide standard camera streaming endpoint."""
+    return StreamingResponse(
+        _state.streamer.generate_mjpeg(),
+        media_type="multipart/x-mixed-replace;boundary=frame",
+    )
 
 
 # Status
@@ -386,9 +625,16 @@ async def control(body: dict):
 async def api_status():
     cpu = psutil.cpu_percent(interval=None)
     mem = psutil.virtual_memory().percent
+    cam_info = _state.camera_manager.get_status() if _state.camera_manager else {}
+    is_cam_online = cam_info.get("connected", False) or (_state.mode == "sim")
+
     return {
         "ai_engine": "ONLINE",
-        "camera": "ONLINE" if (_state.camera or _state.mode == "sim") else "OFFLINE",
+        "camera": "ONLINE" if is_cam_online else "OFFLINE",
+        "camera_source": cam_info.get("source", _state.mode),
+        "camera_status": cam_info.get("status", "disconnected"),
+        "camera_fps": cam_info.get("fps", 0.0),
+        "camera_latency_ms": cam_info.get("latency_ms", 0.0),
         "tts": "ONLINE" if (_state.tts and _state.tts.is_available()) else "OFFLINE",
         "recording": "ON" if (_state.recorder and _state.recorder.is_recording()) else "OFF",
         "stream": "ON",

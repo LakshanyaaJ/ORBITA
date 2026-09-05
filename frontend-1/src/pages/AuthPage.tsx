@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ScanFace, Fingerprint, Lock } from 'lucide-react';
+import GoogleAppsButton from '../components/common/GoogleAppsButton';
 
 
 export default function AuthPage() {
@@ -23,6 +24,10 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-space-900 flex flex-col items-center justify-center relative overflow-hidden font-sans text-space-100">
+      {/* Top-Right Mission Control Launcher */}
+      <div className="absolute top-4 right-6 z-20 flex items-center gap-2">
+        <GoogleAppsButton />
+      </div>
       {/* Background Technical Illustration */}
       <div className="absolute inset-0 opacity-5 pointer-events-none flex items-center justify-center">
         <svg viewBox="0 0 800 800" className="w-[800px] h-[800px] text-accent-cyan">
