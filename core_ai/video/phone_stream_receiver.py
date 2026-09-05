@@ -34,6 +34,7 @@ def get_lan_ip() -> str:
     """Detect local LAN IP address of the Jetson or host machine."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
+        s.settimeout(0.2)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
     except Exception:
@@ -50,7 +51,7 @@ class PhoneStreamReceiver:
 
     def __init__(self, port: int = 8000):
         self.port = port
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._frame_buffer = LatestFrameBuffer(name="phone-cam-buffer")
 
         # Pairing state
