@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "../mission-control.css";
+import CameraControlPanel from "../../components/camera/CameraControlPanel";
 import {
   Activity,
   AlertTriangle,
@@ -136,35 +137,160 @@ function TelemetryCard({ icon: Icon, label, value, detail, tone }: { icon: typeo
   );
 }
 
-function CameraFeed({ demoMode, confidence }: { demoMode: boolean; confidence: number }) {
+function CameraFeed({ 
+  demoMode, 
+  confidence,
+  onExpand,
+  isExpanded = false
+}: { 
+  demoMode: boolean; 
+  confidence: number;
+  onExpand?: () => void;
+  isExpanded?: boolean;
+}) {
+  const [streamError, setStreamError] = useState(false);
+  const [streamVersion, setStreamVersion] = useState(Date.now());
+  const [cameraSource, setCameraSource] = useState<string>("sim");
+  const [cameraFps, setCameraFps] = useState<number>(30);
+
+  useEffect(() => {
+    const pollStatus = () => {
+      fetch("http://localhost:8000/api/camera/status")
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.source) setCameraSource(data.source);
+          if (data.fps) setCameraFps(data.fps);
+          if (streamError && data.connected) {
+            setStreamError(false);
+            setStreamVersion(Date.now());
+          }
+        })
+        .catch(() => {});
+    };
+    pollStatus();
+    const interval = setInterval(pollStatus, 3000);
+    return () => clearInterval(interval);
+  }, [streamError]);
+
+  const sourceName = cameraSource === "ip_camera" 
+    ? "PHONE IP STREAM" 
+    : cameraSource === "jetson_camera" 
+    ? "JETSON CSI STREAM" 
+    : demoMode 
+    ? "SIMULATION FEED" 
+    : "LIVE FEED";
+
   return (
     <div className="camera-frame">
-      <div className="camera-surface">
-        <div className="camera-grid" />
-        <div className="camera-module module-left" />
-        <div className="camera-module module-right" />
-        <div className="camera-floor-line" />
-        <div className="camera-astronaut">
-          <div className="astronaut-helmet"><span /></div>
-          <div className="astronaut-torso"><i /><i /></div>
-          <div className="astronaut-arm arm-left" /><div className="astronaut-arm arm-right" />
-          <div className="astronaut-leg leg-left" /><div className="astronaut-leg leg-right" />
+      <div 
+        className="camera-surface"
+        style={isExpanded ? { height: "460px", position: "relative", overflow: "hidden", borderRadius: "4px" } : { height: "357px", position: "relative", overflow: "hidden", borderRadius: "4px" }}
+      >
+        {/* Real Live Camera MJPEG Feed from ORBITA backend */}
+        {!streamError ? (
+          <img
+            key={streamVersion}
+            src={`http://localhost:8000/video_feed?v=${streamVersion}`}
+            alt="ORBITA Live Camera Stream"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              backgroundColor: "#0d1b22",
+              position: "absolute",
+              inset: 0,
+              zIndex: 1,
+            }}
+            onError={() => setStreamError(true)}
+          />
+        ) : (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 2,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: "#16252e",
+              color: "#dfe5e8",
+              padding: "20px",
+              textAlign: "center",
+            }}
+          >
+            <AlertTriangle size={36} style={{ color: "#b8772a", marginBottom: "8px" }} />
+            <strong style={{ fontFamily: "Space Grotesk", fontSize: "15px", letterSpacing: "0.04em" }}>
+              CAMERA STREAM OFFLINE
+            </strong>
+            <p style={{ fontSize: "11px", color: "#8b989f", marginTop: "4px", maxWidth: "300px" }}>
+              Connecting to backend stream at http://localhost:8000/video_feed. Verify the backend server is running.
+            </p>
+            <button
+              onClick={() => {
+                setStreamError(false);
+                setStreamVersion(Date.now());
+              }}
+              style={{
+                marginTop: "12px",
+                padding: "6px 14px",
+                background: "#2f6f9f",
+                color: "#ffffff",
+                border: "none",
+                borderRadius: "4px",
+                fontSize: "11px",
+                fontFamily: "DM Mono",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              RETRY CONNECTION
+            </button>
+          </div>
+        )}
+
+        {/* Lightweight semi-transparent telemetry HUD overlay */}
+        <div style={{ position: "absolute", inset: 0, zIndex: 4, pointerEvents: "none" }}>
+          <div className="camera-topline">
+            <span style={{ background: "rgba(13,27,34,0.7)", padding: "3px 8px", borderRadius: "3px", backdropFilter: "blur(4px)" }}>
+              CAM-02 / MODULE B
+            </span>
+            <span style={{ background: "rgba(13,27,34,0.7)", padding: "3px 8px", borderRadius: "3px", backdropFilter: "blur(4px)" }}>
+              {sourceName}
+            </span>
+          </div>
+
+          <div className="camera-readout">
+            <span style={{ background: "rgba(13,27,34,0.7)", padding: "3px 8px", borderRadius: "3px", backdropFilter: "blur(4px)" }}>
+              <b className="live-dot" /> LIVE STREAM
+            </span>
+            <span style={{ background: "rgba(13,27,34,0.7)", padding: "3px 8px", borderRadius: "3px", backdropFilter: "blur(4px)" }}>
+              {cameraFps ? `${Math.round(cameraFps)} FPS` : "30 FPS"}
+            </span>
+            <span style={{ background: "rgba(13,27,34,0.7)", padding: "3px 8px", borderRadius: "3px", backdropFilter: "blur(4px)" }}>
+              AI INFERENCE ACTIVE
+            </span>
+          </div>
         </div>
-        <div className="target-box">
-          <span className="target-label">PERSON · AST-01</span>
-          <i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" />
-        </div>
-        <div className="tool-box">
-          <span className="target-label">TOOL · 97.4%</span>
-          <i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" />
-        </div>
-        <div className="camera-topline"><span>CAM-02 / MODULE B</span><span>{demoMode ? "SIMULATION FEED" : "LIVE FEED"}</span></div>
-        <div className="camera-readout"><span><b className="live-dot" /> RECORDING</span><span>28 FPS</span><span>1/60 · ISO 400</span></div>
       </div>
+
       <div className="camera-footer">
-        <div className="feed-subject"><span className="avatar-chip">A1</span><div><strong>ASTRONAUT-01</strong><span>Picking up tool</span></div></div>
-        <div className="feed-confidence"><span>AI CONFIDENCE</span><strong>{confidence.toFixed(1)}%</strong></div>
-        <button className="feed-expand" aria-label="Expand camera feed"><Eye size={15} /> Expand</button>
+        <div className="feed-subject">
+          <span className="avatar-chip">A1</span>
+          <div>
+            <strong>ASTRONAUT-01</strong>
+            <span>Active procedure execution</span>
+          </div>
+        </div>
+        <div className="feed-confidence">
+          <span>AI CONFIDENCE</span>
+          <strong>{confidence.toFixed(1)}%</strong>
+        </div>
+        {onExpand && (
+          <button className="feed-expand" onClick={onExpand} aria-label="Expand camera feed" style={{ cursor: "pointer" }}>
+            <Eye size={15} /> Expand
+          </button>
+        )}
       </div>
     </div>
   );
@@ -199,7 +325,17 @@ function EventsList({ events = baseEvents }: { events?: EventItem[] }) {
   );
 }
 
-function Overview({ demoMode, confidence, onViewAlerts }: { demoMode: boolean; confidence: number; onViewAlerts: () => void }) {
+function Overview({ 
+  demoMode, 
+  confidence, 
+  onViewAlerts,
+  onExpandCamera
+}: { 
+  demoMode: boolean; 
+  confidence: number; 
+  onViewAlerts: () => void;
+  onExpandCamera?: () => void;
+}) {
   return (
     <>
       <div className="page-intro">
@@ -217,7 +353,7 @@ function Overview({ demoMode, confidence, onViewAlerts }: { demoMode: boolean; c
       <div className="dashboard-grid">
         <section className="panel live-panel">
           <SectionHeading eyebrow="CAMERA 02 / MODULE B" title="Live Activity" action={<span className="feed-status"><span className="live-dot" /> {demoMode ? "DEMO STREAM" : "LIVE STREAM"}</span>} />
-          <CameraFeed demoMode={demoMode} confidence={confidence} />
+          <CameraFeed demoMode={demoMode} confidence={confidence} onExpand={onExpandCamera} />
         </section>
 
         <section className="panel activity-panel">
@@ -245,6 +381,107 @@ function Overview({ demoMode, confidence, onViewAlerts }: { demoMode: boolean; c
         </section>
       </div>
     </>
+  );
+}
+
+function LiveMonitoringPage({ 
+  demoMode, 
+  confidence 
+}: { 
+  demoMode: boolean; 
+  confidence: number 
+}) {
+  return (
+    <div className="page-content">
+      <div className="page-intro">
+        <div>
+          <div className="eyebrow">MISSION ALPHA-01 / REAL-TIME STREAM</div>
+          <h1>Live Monitoring &amp; Camera Feed</h1>
+          <p>Real-time edge video pipeline with YOLOv8 object detection, 17-keypoint skeleton pose estimation, and source controls.</p>
+        </div>
+        <div className="intro-actions">
+          <span className="last-sync">
+            <span className="sync-dot" /> STREAM LIVE: 30 FPS · MJPEG
+          </span>
+        </div>
+      </div>
+
+      <div className="dashboard-grid" style={{ gridTemplateColumns: "minmax(0, 1.7fr) minmax(340px, 1fr)" }}>
+        {/* Left Column: Camera Feed & Camera Source Controls */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <section className="panel live-panel">
+            <SectionHeading 
+              eyebrow="CAMERA STREAM · ULTRA-LOW LATENCY" 
+              title="Live Video Feed" 
+              action={<span className="feed-status"><span className="live-dot" /> {demoMode ? "DEMO STREAM" : "LIVE STREAM"}</span>} 
+            />
+            <CameraFeed demoMode={demoMode} confidence={confidence} isExpanded={true} />
+          </section>
+
+          {/* Integrated Camera Source & Settings Control Dock */}
+          <section className="panel" style={{ padding: "18px 22px" }}>
+            <SectionHeading 
+              eyebrow="SOURCE SELECTION &amp; CONTROLS" 
+              title="Camera Hardware &amp; Phone IP Stream" 
+              action={<span className="panel-code">CSI / USB / IP / SIM</span>} 
+            />
+            <div style={{ marginTop: "12px" }}>
+              <CameraControlPanel />
+            </div>
+          </section>
+        </div>
+
+        {/* Right Column: AI Inference, Action Recognition, and Procedure Verification */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <section className="panel activity-panel">
+            <SectionHeading eyebrow="RECOGNITION ENGINE" title="Real-Time Detection" action={<span className="panel-code">ACT-04</span>} />
+            <div className="activity-primary">
+              <span>Current activity</span>
+              <strong>Picking up tool</strong>
+              <div className="confidence-line">
+                <div className="confidence-label">
+                  <span>Confidence</span>
+                  <b>{confidence.toFixed(1)}%</b>
+                </div>
+                <div className="confidence-track">
+                  <div style={{ width: `${confidence}%` }} />
+                </div>
+              </div>
+            </div>
+            <div className="activity-context">
+              <div><span>Target Object</span><strong>Tool / Red Box</strong></div>
+              <ChevronRight size={16} />
+              <div><span>Hand-Object Distance</span><strong>2.4 cm</strong></div>
+            </div>
+            <div className="insight-callout">
+              <Zap size={15} />
+              <p><strong>YOLOv8 + Spatial HAR Active.</strong> Wrist keypoints tracking proximity to target payload container.</p>
+            </div>
+          </section>
+
+          <section className="panel procedure-panel">
+            <SectionHeading eyebrow="PROCEDURE 04 / 08" title="Active Step Tracking" action={<StatusPill tone="verified">VERIFIED</StatusPill>} />
+            <div className="procedure-summary">
+              <div><span>Current step</span><strong>Position tool</strong></div>
+              <div className="procedure-score"><span>COMPLIANCE</span><strong>94.6%</strong></div>
+            </div>
+            <ProcedureTimeline />
+          </section>
+
+          <section className="panel">
+            <SectionHeading eyebrow="SYSTEM METRICS" title="Hardware Pipeline" action={<span className="panel-code">NVIDIA JETSON</span>} />
+            <div style={{ padding: "0 20px 20px" }}>
+              <div className="telemetry-stack">
+                <TelemetryCard icon={Monitor} label="Video Latency" value="12.5 ms" detail="Drop-stale buffer" tone="green" />
+                <TelemetryCard icon={Zap} label="Inference Rate" value="28.4 FPS" detail="YOLOv8n-pose" tone="blue" />
+                <TelemetryCard icon={Cpu} label="Compute Load" value="20.9%" detail="Jetson Orin Nano" tone="blue" />
+                <TelemetryCard icon={ShieldCheck} label="Safety Interlock" value="CLEAR" detail="Nominal workspace" tone="green" />
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -294,13 +531,15 @@ export default function Home() {
     return now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   }, [confidence]);
 
-  const content = activeNav === "Dashboard" || activeNav === "Live Monitoring"
-    ? <Overview demoMode={demoMode} confidence={confidence} onViewAlerts={() => setActiveNav("Alerts")} />
-    : activeNav === "Analytics" ? <AnalyticsPage />
-      : activeNav === "Mission" ? <MissionPage />
-        : activeNav === "Alerts" ? <AlertsPage />
-          : activeNav === "Procedure" ? <ProcedurePage />
-            : <SettingsPage demoMode={demoMode} setDemoMode={setDemoMode} />;
+  const content = activeNav === "Dashboard"
+    ? <Overview demoMode={demoMode} confidence={confidence} onViewAlerts={() => setActiveNav("Alerts")} onExpandCamera={() => setActiveNav("Live Monitoring")} />
+    : activeNav === "Live Monitoring"
+      ? <LiveMonitoringPage demoMode={demoMode} confidence={confidence} />
+      : activeNav === "Analytics" ? <AnalyticsPage />
+        : activeNav === "Mission" ? <MissionPage />
+          : activeNav === "Alerts" ? <AlertsPage />
+            : activeNav === "Procedure" ? <ProcedurePage />
+              : <SettingsPage demoMode={demoMode} setDemoMode={setDemoMode} />;
 
   return (
     <div className="orbita-shell">
