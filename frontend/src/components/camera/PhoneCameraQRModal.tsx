@@ -31,28 +31,40 @@ export default function PhoneCameraQRModal({
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const pollTimerRef = useRef<any>(null);
 
   const fetchPairing = async () => {
-    const info = await getPhonePairingInfo();
-    if (info) {
-      setPairingInfo(info);
-      if (info.connected) {
-        onConnected?.();
+    try {
+      const info = await getPhonePairingInfo();
+      if (info) {
+        setPairingInfo(info);
+        setFetchError(null);
+        setLoading(false);
+        if (info.connected) {
+          onConnected?.();
+        }
+        try {
+          const url = await QRCode.toDataURL(info.connection_url, {
+            width: 240,
+            margin: 1.5,
+            color: {
+              dark: '#030712',
+              light: '#ffffff',
+            },
+          });
+          setQrDataUrl(url);
+        } catch (e) {
+          console.error('QR code generation error', e);
+        }
+      } else {
+        setFetchError('Unable to connect to ORBITA server on port 8000');
+        setLoading(false);
       }
-      try {
-        const url = await QRCode.toDataURL(info.connection_url, {
-          width: 240,
-          margin: 1.5,
-          color: {
-            dark: '#030712',
-            light: '#ffffff',
-          },
-        });
-        setQrDataUrl(url);
-      } catch (e) {
-        console.error('QR code generation error', e);
-      }
+    } catch (err: any) {
+      setFetchError(err?.message || 'Failed to reach backend');
+      setLoading(false);
     }
   };
 
@@ -130,9 +142,21 @@ export default function PhoneCameraQRModal({
                 alt="Phone Webcam Pairing QR"
                 className="w-56 h-56 object-contain rounded"
               />
+            ) : fetchError ? (
+              <div className="w-56 h-56 flex flex-col items-center justify-center text-rose-600 font-mono text-xs p-3 text-center gap-2">
+                <span className="text-red-500 font-bold">{fetchError}</span>
+                <button
+                  type="button"
+                  onClick={fetchPairing}
+                  className="px-3 py-1.5 bg-space-800 text-space-100 rounded text-xs font-bold hover:bg-space-700 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
             ) : (
-              <div className="w-56 h-56 flex items-center justify-center text-space-900 font-mono text-xs">
-                Generating QR...
+              <div className="w-56 h-56 flex flex-col items-center justify-center text-space-900 font-mono text-xs gap-2">
+                <RefreshCw size={20} className="animate-spin text-space-600" />
+                <span>Generating QR...</span>
               </div>
             )}
 
