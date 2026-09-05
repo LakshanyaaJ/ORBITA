@@ -17,14 +17,14 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from orbita.app.config import CameraConfig
-from orbita.video.camera import Camera
-from orbita.video.camera_config import (
+from core_ai.app.config import CameraConfig
+from core_ai.video.camera import Camera
+from core_ai.video.camera_config import (
     IPCameraConfig,
     get_default_ip_camera_url,
     validate_and_format_camera_url,
 )
-from orbita.video.ip_camera import IPCamera
+from core_ai.video.ip_camera import IPCamera
 
 logger = logging.getLogger(__name__)
 

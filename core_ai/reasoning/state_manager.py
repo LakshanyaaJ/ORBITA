@@ -18,11 +18,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from orbita.app.config import ExperimentStep, OrbitaConfig
-from orbita.har.temporal_model import ActionPrediction
-from orbita.reasoning.fsm import ExperimentFSM, FSMState, FSMStatus
-from orbita.reasoning.rules import RuleMatch, RuleResult, evaluate_rules
-from orbita.perception.object_detector import DetectedObject
+from core_ai.app.config import ExperimentStep, OrbitaConfig
+from core_ai.har.temporal_model import ActionPrediction
+from core_ai.reasoning.fsm import ExperimentFSM, FSMState, FSMStatus
+from core_ai.reasoning.rules import RuleMatch, RuleResult, evaluate_rules
+from core_ai.perception.object_detector import DetectedObject
 
 logger = logging.getLogger(__name__)
 

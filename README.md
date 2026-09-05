@@ -61,11 +61,11 @@ ORBITA/
 │   ├── yolov8n.pt                        # YOLOv8 Object Detection (COCO classes)
 │   └── yolov8n-pose.pt                   # YOLOv8 Pose Estimation (17 keypoints)
 │
-├── backend/                              # Top-level API service facade (uvicorn server.py)
+├── server/                               # Top-level API service facade (uvicorn server.server:app)
 │   ├── __init__.py
 │   └── server.py
 │
-├── orbita/                               # Core Python Edge-AI Package
+├── core_ai/                              # Core Python Edge-AI Package
 │   ├── app/                              # Configuration loaders
 │   ├── backend/                          # FastAPI REST API & WebSocket Server
 │   ├── database/                         # SQLite session persistence

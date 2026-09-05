@@ -32,27 +32,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from orbita.app.config import OrbitaConfig, load_config
-from orbita.backend.websocket_manager import WebSocketManager
-from orbita.har.feature_fusion import TemporalFeatureWindow, build_feature_vector
-from orbita.har.temporal_model import ActionClassifier, ActionPrediction
-from orbita.interaction.hand_object import HandObjectInteractionTracker
-from orbita.logging.experiment_logger import ExperimentLogger
-from orbita.perception.hand_tracker import HandTracker
-from orbita.perception.object_detector import ObjectDetector
-from orbita.perception.pose_estimator import PoseEstimator
-from orbita.reasoning.state_manager import StateManager, ValidationResult
-from orbita.simulation.simulator import ExperimentSimulator, Scenario
-from orbita.video.camera import Camera
-from orbita.video.camera_config import (
+from core_ai.app.config import OrbitaConfig, load_config
+from core_ai.backend.websocket_manager import WebSocketManager
+from core_ai.har.feature_fusion import TemporalFeatureWindow, build_feature_vector
+from core_ai.har.temporal_model import ActionClassifier, ActionPrediction
+from core_ai.interaction.hand_object import HandObjectInteractionTracker
+from core_ai.logging.experiment_logger import ExperimentLogger
+from core_ai.perception.hand_tracker import HandTracker
+from core_ai.perception.object_detector import ObjectDetector
+from core_ai.perception.pose_estimator import PoseEstimator
+from core_ai.reasoning.state_manager import StateManager, ValidationResult
+from core_ai.simulation.simulator import ExperimentSimulator, Scenario
+from core_ai.video.camera import Camera
+from core_ai.video.camera_config import (
     IPCameraConfig,
     get_default_ip_camera_url,
     validate_and_format_camera_url,
 )
-from orbita.video.camera_manager import CameraManager
-from orbita.video.recorder import VideoRecorder
-from orbita.video.streamer import MJPEGStreamer
-from orbita.voice.tts import TTSEngine
+from core_ai.video.camera_manager import CameraManager
+from core_ai.video.recorder import VideoRecorder
+from core_ai.video.streamer import MJPEGStreamer
+from core_ai.voice.tts import TTSEngine
 
 logger = logging.getLogger(__name__)
 
@@ -451,6 +451,11 @@ app.add_middleware(
 )
 
 
+def create_app() -> FastAPI:
+    """Return the FastAPI application instance."""
+    return app
+
+
 # Video stream
 @app.get("/video_feed")
 async def video_feed():
@@ -470,7 +475,7 @@ async def ws_telemetry(websocket: WebSocket):
             if _state.last_result:
                 await websocket.send_text(json.dumps(_state.last_result.to_dict()))
             await asyncio.sleep(0.1)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         _state.ws_manager.disconnect(websocket)
 
 
@@ -659,7 +664,7 @@ async def api_logs():
 # Past experiments
 @app.get("/api/experiments")
 async def api_experiments():
-    from orbita.database.sqlite_db import OrbitaDB
+    from core_ai.database.sqlite_db import OrbitaDB
     db = OrbitaDB()
     return db.list_experiments()
 

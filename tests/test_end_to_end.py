@@ -18,16 +18,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orbita.app.config import load_config, PoseConfig, HandConfig
-from orbita.har.feature_fusion import TemporalFeatureWindow, build_feature_vector
-from orbita.har.temporal_model import ActionClassifier, ActionPrediction
-from orbita.interaction.hand_object import HandObjectInteractionTracker
-from orbita.perception.hand_tracker import HandTracker
-from orbita.perception.object_detector import ObjectDetector
-from orbita.perception.pose_estimator import PoseEstimator
-from orbita.reasoning.fsm import FSMStatus
-from orbita.reasoning.state_manager import StateManager
-from orbita.simulation.simulator import ExperimentSimulator, Scenario
+from core_ai.app.config import load_config, PoseConfig, HandConfig
+from core_ai.har.feature_fusion import TemporalFeatureWindow, build_feature_vector
+from core_ai.har.temporal_model import ActionClassifier, ActionPrediction
+from core_ai.interaction.hand_object import HandObjectInteractionTracker
+from core_ai.perception.hand_tracker import HandTracker
+from core_ai.perception.object_detector import ObjectDetector
+from core_ai.perception.pose_estimator import PoseEstimator
+from core_ai.reasoning.fsm import FSMStatus
+from core_ai.reasoning.state_manager import StateManager
+from core_ai.simulation.simulator import ExperimentSimulator, Scenario
 
 
 def build_pipeline(scenario: str):

@@ -8,11 +8,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orbita.simulation.simulator import ExperimentSimulator, Scenario
-from orbita.perception.object_detector import ObjectDetector, DetectedObject
-from orbita.perception.pose_estimator import PoseEstimator
-from orbita.perception.hand_tracker import HandTracker
-from orbita.interaction.hand_object import HandObjectInteractionTracker
+from core_ai.simulation.simulator import ExperimentSimulator, Scenario
+from core_ai.perception.object_detector import ObjectDetector, DetectedObject
+from core_ai.perception.pose_estimator import PoseEstimator
+from core_ai.perception.hand_tracker import HandTracker
+from core_ai.interaction.hand_object import HandObjectInteractionTracker
 
 
 def get_sim_frame(scenario: str = "A") -> np.ndarray:
@@ -25,7 +25,7 @@ def get_sim_frame(scenario: str = "A") -> np.ndarray:
 
 class TestObjectDetector:
     def test_returns_list(self):
-        from orbita.app.config import DetectionConfig
+        from core_ai.app.config import DetectionConfig
         cfg = DetectionConfig(use_yolo=False)
         detector = ObjectDetector(cfg)
         frame = get_sim_frame()
@@ -33,7 +33,7 @@ class TestObjectDetector:
         assert isinstance(results, list)
 
     def test_detected_objects_have_required_fields(self):
-        from orbita.app.config import DetectionConfig
+        from core_ai.app.config import DetectionConfig
         cfg = DetectionConfig(use_yolo=False)
         detector = ObjectDetector(cfg)
         frame = get_sim_frame()
@@ -47,7 +47,7 @@ class TestObjectDetector:
 
     def test_detects_colored_boxes(self):
         """Simulator renders colored boxes; chroma detector should find them."""
-        from orbita.app.config import DetectionConfig
+        from core_ai.app.config import DetectionConfig
         cfg = DetectionConfig(use_yolo=False)
         detector = ObjectDetector(cfg)
         frame = get_sim_frame("A")
@@ -60,7 +60,7 @@ class TestObjectDetector:
         assert len(found) >= 0  # Soft assertion — depends on render frame
 
     def test_draw_returns_correct_shape(self):
-        from orbita.app.config import DetectionConfig
+        from core_ai.app.config import DetectionConfig
         cfg = DetectionConfig(use_yolo=False)
         detector = ObjectDetector(cfg)
         frame = get_sim_frame()
@@ -71,7 +71,7 @@ class TestObjectDetector:
 
 class TestPoseEstimator:
     def test_mock_backend_returns_pose(self):
-        from orbita.app.config import PoseConfig
+        from core_ai.app.config import PoseConfig
         cfg = PoseConfig(backend="mock")
         estimator = PoseEstimator(cfg)
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -83,7 +83,7 @@ class TestPoseEstimator:
         assert pose.keypoints_norm.shape == (17, 2)
 
     def test_normalized_keypoints_in_reasonable_range(self):
-        from orbita.app.config import PoseConfig
+        from core_ai.app.config import PoseConfig
         cfg = PoseConfig(backend="mock")
         estimator = PoseEstimator(cfg)
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -93,7 +93,7 @@ class TestPoseEstimator:
         assert np.all(np.abs(pose.keypoints_norm) < 5.0)
 
     def test_torso_length_positive(self):
-        from orbita.app.config import PoseConfig
+        from core_ai.app.config import PoseConfig
         cfg = PoseConfig(backend="mock")
         estimator = PoseEstimator(cfg)
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -104,7 +104,7 @@ class TestPoseEstimator:
 
 class TestHandTrackerAndInteraction:
     def test_hand_tracker_returns_two_hands(self):
-        from orbita.app.config import PoseConfig, HandConfig
+        from core_ai.app.config import PoseConfig, HandConfig
         pose_cfg = PoseConfig(backend="mock")
         hand_cfg = HandConfig(backend="pose")
         estimator = PoseEstimator(pose_cfg)
@@ -117,7 +117,7 @@ class TestHandTrackerAndInteraction:
         assert right.side == "right"
 
     def test_hand_position_within_frame(self):
-        from orbita.app.config import PoseConfig, HandConfig
+        from core_ai.app.config import PoseConfig, HandConfig
         pose_cfg = PoseConfig(backend="mock")
         hand_cfg = HandConfig(backend="pose")
         estimator = PoseEstimator(pose_cfg)
@@ -134,7 +134,7 @@ class TestHandTrackerAndInteraction:
                 assert -50 < hand.position[1] < h + 50
 
     def test_interaction_tracker_returns_list(self):
-        from orbita.app.config import PoseConfig, HandConfig, InteractionConfig
+        from core_ai.app.config import PoseConfig, HandConfig, InteractionConfig
         pose_cfg = PoseConfig(backend="mock")
         hand_cfg = HandConfig(backend="pose")
         int_cfg = InteractionConfig()

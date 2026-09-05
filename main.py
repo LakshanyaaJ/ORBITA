@@ -21,17 +21,13 @@ import logging
 import sys
 import time
 
-try:
-    import orbita
-except ModuleNotFoundError:
-    import ORBITA as orbita
-    sys.modules["orbita"] = orbita
+import core_ai
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s — %(message)s",
 )
-logger = logging.getLogger("orbita.main")
+logger = logging.getLogger("core_ai.main")
 
 
 def parse_args():
@@ -68,7 +64,7 @@ def parse_args():
 def run_web(args):
     """Start FastAPI backend."""
     import uvicorn
-    from orbita.backend.api import app, _state
+    from core_ai.backend.api import app, _state
 
     # Pre-configure state before startup
     _state.mode = "webcam" if args.camera else "sim"
@@ -90,16 +86,16 @@ def run_web(args):
 def run_desktop(args):
     """Run with OpenCV display window."""
     import cv2
-    from orbita.app.config import load_config
-    from orbita.simulation.simulator import ExperimentSimulator, Scenario
-    from orbita.perception.object_detector import ObjectDetector
-    from orbita.perception.pose_estimator import PoseEstimator
-    from orbita.perception.hand_tracker import HandTracker
-    from orbita.interaction.hand_object import HandObjectInteractionTracker
-    from orbita.har.feature_fusion import TemporalFeatureWindow, build_feature_vector
-    from orbita.har.temporal_model import ActionClassifier, ActionPrediction
-    from orbita.reasoning.state_manager import StateManager
-    from orbita.voice.tts import TTSEngine
+    from core_ai.app.config import load_config
+    from core_ai.simulation.simulator import ExperimentSimulator, Scenario
+    from core_ai.perception.object_detector import ObjectDetector
+    from core_ai.perception.pose_estimator import PoseEstimator
+    from core_ai.perception.hand_tracker import HandTracker
+    from core_ai.interaction.hand_object import HandObjectInteractionTracker
+    from core_ai.har.feature_fusion import TemporalFeatureWindow, build_feature_vector
+    from core_ai.har.temporal_model import ActionClassifier, ActionPrediction
+    from core_ai.reasoning.state_manager import StateManager
+    from core_ai.voice.tts import TTSEngine
 
     cfg = load_config(args.config)
     if args.no_voice:

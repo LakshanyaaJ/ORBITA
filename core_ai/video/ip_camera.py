@@ -22,7 +22,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-from orbita.video.camera_config import IPCameraConfig
+from core_ai.video.camera_config import IPCameraConfig
 
 logger = logging.getLogger(__name__)
 

@@ -6,5 +6,10 @@ Architecture:
   CAMERA → PERCEPTION → INTERACTION → HAR → FSM+RULES → VOICE/LOG → DASHBOARD
 """
 
+import sys
+
 __version__ = "1.0.0"
 __author__ = "ORBITA Team"
+
+# Maintain full backwards compatibility for any modules or tests referencing `orbita`
+sys.modules.setdefault("orbita", sys.modules[__name__])

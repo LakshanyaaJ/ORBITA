@@ -22,7 +22,7 @@ from typing import Optional
 
 import numpy as np
 
-from orbita.perception.pose_estimator import PoseResult
+from core_ai.perception.pose_estimator import PoseResult
 
 logger = logging.getLogger(__name__)
 

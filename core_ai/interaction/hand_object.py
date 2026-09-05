@@ -36,8 +36,8 @@ from typing import Optional
 
 import numpy as np
 
-from orbita.perception.object_detector import DetectedObject
-from orbita.perception.hand_tracker import HandState
+from core_ai.perception.object_detector import DetectedObject
+from core_ai.perception.hand_tracker import HandState
 
 logger = logging.getLogger(__name__)
 

@@ -115,7 +115,7 @@ class ObjectDetector:
     def __init__(self, config, hsv_ranges: dict | None = None):
         """
         Args:
-            config: DetectionConfig from orbita.app.config
+            config: DetectionConfig from core_ai.app.config
             hsv_ranges: Override HSV colour ranges (optional)
         """
         self.config = config

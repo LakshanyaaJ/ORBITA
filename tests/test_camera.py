@@ -11,18 +11,14 @@ import sys
 import unittest
 import numpy as np
 
-try:
-    import orbita
-except ImportError:
-    import ORBITA as orbita
-    sys.modules['orbita'] = orbita
+import core_ai
 
-from orbita.video.camera_config import (
+from core_ai.video.camera_config import (
     validate_and_format_camera_url,
     IPCameraConfig,
 )
-from orbita.video.camera_manager import CameraManager
-from orbita.video.ip_camera import IPCamera
+from core_ai.video.camera_manager import CameraManager
+from core_ai.video.ip_camera import IPCamera
 
 
 class TestCameraConfigValidation(unittest.TestCase):

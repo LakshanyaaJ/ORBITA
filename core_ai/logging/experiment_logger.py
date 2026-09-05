@@ -27,9 +27,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from orbita.database.sqlite_db import OrbitaDB
-from orbita.reasoning.state_manager import ValidationResult
-from orbita.reasoning.fsm import FSMStatus
+from core_ai.database.sqlite_db import OrbitaDB
+from core_ai.reasoning.state_manager import ValidationResult
+from core_ai.reasoning.fsm import FSMStatus
 
 logger = logging.getLogger(__name__)
 

@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orbita.app.config import ExperimentStep, load_config
-from orbita.reasoning.fsm import ExperimentFSM, FSMStatus
-from orbita.reasoning.rules import evaluate_rules
+from core_ai.app.config import ExperimentStep, load_config
+from core_ai.reasoning.fsm import ExperimentFSM, FSMStatus
+from core_ai.reasoning.rules import evaluate_rules
 
 
 def make_steps():

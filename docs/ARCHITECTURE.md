@@ -59,20 +59,20 @@ ORBITA is an edge-native AI Activity Recognition and Mission Oversight System de
 
 ---
 
-## 2. Core Python Components (`orbita/`)
+## 2. Core Python Components (`core_ai/`)
 
 | Module | Purpose |
 |---|---|
-| `orbita.perception` | YOLOv8 object detector and pose keypoint estimator |
-| `orbita.interaction` | Hand-object contact analysis and grasp detection |
-| `orbita.har` | Feature vector fusion and temporal action recognition |
-| `orbita.reasoning` | Finite State Machine (FSM) procedure tracking and rule validation |
-| `orbita.video` | Multi-source camera manager (CSI, USB, Phone IP Webcam, Simulation) |
-| `orbita.database` | SQLite telemetry logger and step event tracking |
-| `orbita.voice` | Real-time text-to-speech feedback and procedural guidance |
-| `orbita.simulation` | Synthetic frame generation for testing scenarios A, B, and C |
-| `orbita.backend` | FastAPI REST endpoints and WebSockets for telemetry & video |
-| `orbita.app` | Central dataclass configurations and JSON loaders |
+| `core_ai.perception` | YOLOv8 object detector and pose keypoint estimator |
+| `core_ai.interaction` | Hand-object contact analysis and grasp detection |
+| `core_ai.har` | Feature vector fusion and temporal action recognition |
+| `core_ai.reasoning` | Finite State Machine (FSM) procedure tracking and rule validation |
+| `core_ai.video` | Multi-source camera manager (CSI, USB, Phone IP Webcam, Simulation) |
+| `core_ai.database` | SQLite telemetry logger and step event tracking |
+| `core_ai.voice` | Real-time text-to-speech feedback and procedural guidance |
+| `core_ai.simulation` | Synthetic frame generation for testing scenarios A, B, and C |
+| `core_ai.backend` | FastAPI REST endpoints and WebSockets for telemetry & video |
+| `core_ai.app` | Central dataclass configurations and JSON loaders |
 
 ---
 

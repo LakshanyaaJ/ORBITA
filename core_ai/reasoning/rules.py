@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
-from orbita.app.config import ExperimentStep
+from core_ai.app.config import ExperimentStep
 
 logger = logging.getLogger(__name__)
 

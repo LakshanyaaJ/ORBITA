@@ -8,12 +8,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from orbita.har.feature_fusion import (
+from core_ai.har.feature_fusion import (
     FEATURE_DIM,
     TemporalFeatureWindow,
     build_feature_vector,
 )
-from orbita.har.temporal_model import (
+from core_ai.har.temporal_model import (
     ActionClassifier,
     ActionPrediction,
     ACTIONS,
@@ -75,7 +75,7 @@ class TestFeatureFusion:
 
     def test_object_onehot_populated(self):
         """Object presence should be encoded in the one-hot section [50:60]."""
-        from orbita.perception.object_detector import DetectedObject
+        from core_ai.perception.object_detector import DetectedObject
         obj = DetectedObject(
             class_name="RED_BOX",
             confidence=0.85,
@@ -110,7 +110,7 @@ class TestHeuristicPredict:
 
 class TestActionClassifier:
     def test_classifier_returns_prediction(self):
-        from orbita.app.config import HARConfig
+        from core_ai.app.config import HARConfig
         cfg = HARConfig()
         classifier = ActionClassifier(cfg)
         window = np.zeros((30, FEATURE_DIM), dtype=np.float32)
@@ -119,7 +119,7 @@ class TestActionClassifier:
         assert result.action in ACTIONS
 
     def test_classifier_uncertain_flag(self):
-        from orbita.app.config import HARConfig
+        from core_ai.app.config import HARConfig
         cfg = HARConfig(action_confidence_min=0.99)  # Very high threshold
         classifier = ActionClassifier(cfg)
         window = np.zeros((30, FEATURE_DIM), dtype=np.float32)

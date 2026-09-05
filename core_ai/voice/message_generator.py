@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from orbita.reasoning.fsm import FSMState, FSMStatus
-from orbita.app.config import ExperimentStep
+from core_ai.reasoning.fsm import FSMState, FSMStatus
+from core_ai.app.config import ExperimentStep
 
 
 class MessageGenerator:
