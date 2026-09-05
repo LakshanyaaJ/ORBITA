@@ -29,11 +29,14 @@ pnpm-debug.log*
 *.log
 logs/
 
-# Database (preserve experiments/ schema/demo, but ignore runtime sqlite locks/journals)
+# Database (runtime SQLite database & lock journals)
+*.db
+*.sqlite3
 *.sqlite3-journal
 *.db-journal
 *.db-wal
 *.db-shm
+!experiments/.gitkeep
 
 # IDE & Editor
 .vscode/
