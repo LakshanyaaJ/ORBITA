@@ -113,13 +113,19 @@ class PhoneStreamReceiver:
     def get_connection_info(self) -> Dict[str, Any]:
         """Return pairing metadata for QR code and manual connection."""
         lan_ip = get_lan_ip()
+        https_port = 8443
         with self._lock:
-            url = f"http://{lan_ip}:{self.port}/cam?token={self._pairing_token}"
+            # HTTPS Secure Context is required by mobile browsers for getUserMedia
+            https_url = f"https://{lan_ip}:{https_port}/cam?token={self._pairing_token}"
+            http_url = f"http://{lan_ip}:{self.port}/cam?token={self._pairing_token}"
             return {
                 "pairing_token": self._pairing_token,
                 "lan_ip": lan_ip,
                 "port": self.port,
-                "connection_url": url,
+                "https_port": https_port,
+                "connection_url": https_url,
+                "https_url": https_url,
+                "http_url": http_url,
                 "connected": self.is_connected,
                 "fps": self._actual_fps,
                 "latency_ms": round(self.latency_ms, 1),

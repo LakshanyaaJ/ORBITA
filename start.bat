@@ -44,7 +44,7 @@ if %ERRORLEVEL% neq 0 (
 
 :: Free ports if any lingering zombie processes exist
 echo [*] Freeing ports 8000 and 5173/5174...
-powershell -NoProfile -Command "$ports = @(8000, 5173, 5174); $pids = (Get-NetTCPConnection -LocalPort $ports -State Listen -ErrorAction SilentlyContinue).OwningProcess; if ($pids) { Get-Process -Id $pids -ErrorAction SilentlyContinue | Stop-Process -Force }" 2>nul
+powershell -NoProfile -Command "$ports = @(8000, 8443, 5173, 5174); $pids = (Get-NetTCPConnection -LocalPort $ports -State Listen -ErrorAction SilentlyContinue).OwningProcess; if ($pids) { Get-Process -Id $pids -ErrorAction SilentlyContinue | Stop-Process -Force }" 2>nul
 
 echo [*] Starting ORBITA Backend (FastAPI on Port 8000)...
 start "ORBITA - Backend" cmd /k "title ORBITA - Backend && cd /d "%ROOT_DIR%" && "%PYTHON_CMD%" main.py --mode web --scenario A"
@@ -77,5 +77,4 @@ start http://localhost:5173
 
 echo.
 echo Launcher finished. Press any key to close this launcher window...
-pause >nul
-exit /b 0
+exit

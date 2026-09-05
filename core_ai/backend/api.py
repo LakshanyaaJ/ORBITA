@@ -180,6 +180,8 @@ async def lifespan(app: FastAPI):
 
 async def _startup() -> None:
     global _state
+    if _state.is_running:
+        return
     _state._main_loop = asyncio.get_running_loop()
     _state.config = load_config()
 

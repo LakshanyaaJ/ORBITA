@@ -7,9 +7,11 @@ import {
   RotateCw,
   Sun,
   ShieldCheck,
+  ShieldAlert,
   Smartphone,
   RefreshCw,
   AlertCircle,
+  ExternalLink,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -22,6 +24,7 @@ export default function PhoneWebcam() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'live' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [httpsSwitchUrl, setHttpsSwitchUrl] = useState<string | null>(null);
 
   // Camera settings
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
@@ -63,9 +66,22 @@ export default function PhoneWebcam() {
     const loc = window.location;
     const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
     // If running Vite dev port (5173/5174), point backend to 8000
-    const port = loc.port === '5173' || loc.port === '5174' ? '8000' : (loc.port || '8000');
+    const port = loc.port === '5173' || loc.port === '5174' ? '8000' : (loc.port || (loc.protocol === 'https:' ? '8443' : '8000'));
     return `${protocol}//${loc.hostname}:${port}/ws/phone_camera?token=${pairingToken}`;
   }, [pairingToken]);
+
+  // Check browser Secure Context for camera API
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const isLoopback = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const hasMedia = !!navigator?.mediaDevices?.getUserMedia;
+      if (!isLoopback && (!window.isSecureContext || !hasMedia)) {
+        const httpsPort = '8443';
+        const httpsUrl = `https://${window.location.hostname}:${httpsPort}${window.location.pathname}${window.location.search}`;
+        setHttpsSwitchUrl(httpsUrl);
+      }
+    }
+  }, []);
 
   // Acquire Screen WakeLock to prevent screen dimming
   const requestWakeLock = useCallback(async () => {
@@ -144,6 +160,17 @@ export default function PhoneWebcam() {
   const startCamera = async () => {
     setErrorMessage(null);
     setConnectionStatus('connecting');
+
+    if (!navigator?.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setConnectionStatus('error');
+      const httpsPort = '8443';
+      const httpsUrl = `https://${window.location.hostname}:${httpsPort}${window.location.pathname}${window.location.search}`;
+      setHttpsSwitchUrl(httpsUrl);
+      setErrorMessage(
+        'Mobile Camera Security: Mobile browsers (Chrome/Safari) require HTTPS to access camera over Wi-Fi.'
+      );
+      return;
+    }
 
     try {
       if (streamRef.current) {
@@ -396,6 +423,35 @@ export default function PhoneWebcam() {
           <div className="p-3 bg-status-critical/15 border border-status-critical/40 rounded flex items-start gap-2.5 text-xs text-status-critical font-mono">
             <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
             <div className="flex-1">{errorMessage}</div>
+          </div>
+        )}
+
+        {/* HTTPS Mobile Security Helper Card */}
+        {httpsSwitchUrl && (
+          <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-left text-xs font-mono space-y-2.5 animate-in fade-in duration-200">
+            <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
+              <ShieldAlert size={16} className="flex-shrink-0" />
+              <span>HTTPS Secure Context Required</span>
+            </div>
+            <p className="text-space-300 text-[11px] leading-relaxed">
+              Mobile browsers (Android Chrome, iOS Safari) strictly block camera access over unencrypted HTTP.
+              Tap below to switch to the secure HTTPS camera feed:
+            </p>
+            <div className="pt-1">
+              <a
+                href={httpsSwitchUrl}
+                className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 bg-accent-cyan hover:bg-accent-cyan/90 text-space-950 font-bold rounded text-xs transition-colors shadow-sm"
+              >
+                <span>SWITCH TO HTTPS (PORT 8443)</span>
+                <ExternalLink size={14} />
+              </a>
+            </div>
+            <div className="p-2 bg-space-950/60 rounded border border-space-800 text-[10px] text-space-400 space-y-1">
+              <div className="font-bold text-space-300">Self-Signed Certificate Tip:</div>
+              <div>1. When your browser warns <i>"Connection not private"</i>, tap <b>Advanced</b>.</div>
+              <div>2. Tap <b>Proceed to {typeof window !== 'undefined' ? window.location.hostname : 'IP'} (unsafe)</b>.</div>
+              <div>3. Tap <b>Allow</b> when prompted for camera permissions.</div>
+            </div>
           </div>
         )}
 

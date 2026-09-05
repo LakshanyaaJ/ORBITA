@@ -24,6 +24,8 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+*.pem
+config/*.pem
 
 # Logs & temporary files
 *.log

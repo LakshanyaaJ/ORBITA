@@ -70,9 +70,35 @@ def run_web(args):
     _state.mode = "webcam" if args.camera else "sim"
     _state.current_scenario = args.scenario
 
+    import threading
+    from core_ai.backend.ssl_helper import ensure_ssl_certificates
+
+    cert_path, key_path = ensure_ssl_certificates()
+    https_port = 8443
+
+    # Start concurrent HTTPS server on port 8443 for mobile Secure Context
+    def _run_https():
+        try:
+            logger.info("Starting ORBITA HTTPS server for mobile camera on https://0.0.0.0:%d", https_port)
+            uvicorn.run(
+                app,
+                host="0.0.0.0",
+                port=https_port,
+                ssl_certfile=cert_path,
+                ssl_keyfile=key_path,
+                lifespan="off",
+                log_level="warning",
+            )
+        except Exception as e:
+            logger.warning("HTTPS server startup failed: %s", e)
+
+    https_thread = threading.Thread(target=_run_https, daemon=True, name="orbita-https-server")
+    https_thread.start()
+
     logger.info("Starting ORBITA web server on http://0.0.0.0:%d", args.port)
     logger.info("Dashboard: http://localhost:%d", args.port)
     logger.info("Video feed: http://localhost:%d/video_feed", args.port)
+    logger.info("Phone Cam (HTTPS): https://0.0.0.0:%d/cam", https_port)
     logger.info("Scenario: %s", args.scenario)
 
     uvicorn.run(
