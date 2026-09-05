@@ -482,8 +482,8 @@ export default function PhoneWebcam() {
             <span className="font-bold text-accent-cyan">{rttMs > 0 ? `${rttMs}` : '<10'} <span className="text-[9px] font-normal text-space-400">ms</span></span>
           </div>
           <div className="flex flex-col pl-1">
-            <span className="text-[9px] uppercase tracking-wider text-space-400">Queue</span>
-            <span className="font-bold text-status-success">1 <span className="text-[9px] font-normal text-space-400">zero-lag</span></span>
+            <span className="text-[9px] uppercase tracking-wider text-space-400">Queue / Drop</span>
+            <span className="font-bold text-status-success">1 <span className="text-[9px] font-normal text-space-400">| d:{droppedFrames}</span></span>
           </div>
         </div>
 
@@ -494,7 +494,7 @@ export default function PhoneWebcam() {
             <span className="text-[10px] text-accent-cyan lowercase">720p @ 30fps optimal</span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+          <div className="grid grid-cols-3 gap-2 text-xs font-mono">
             {/* Camera Switch */}
             <div>
               <label className="text-[10px] text-space-400 block mb-1">FACING</label>
@@ -502,10 +502,10 @@ export default function PhoneWebcam() {
                 type="button"
                 disabled={isStreaming}
                 onClick={toggleFacingMode}
-                className="w-full py-1.5 px-2.5 rounded bg-space-800 border border-space-700 text-space-200 text-left flex items-center justify-between disabled:opacity-50"
+                className="w-full py-1.5 px-2 rounded bg-space-800 border border-space-700 text-space-200 text-left flex items-center justify-between disabled:opacity-50"
               >
-                <span>{facingMode === 'environment' ? 'Rear (Main)' : 'Front (Selfie)'}</span>
-                <Camera size={13} className="text-space-400" />
+                <span className="truncate">{facingMode === 'environment' ? 'Rear' : 'Front'}</span>
+                <Camera size={12} className="text-space-400 flex-shrink-0" />
               </button>
             </div>
 
@@ -521,11 +521,26 @@ export default function PhoneWebcam() {
                   else if (val === '720p') setResolution({ width: 1280, height: 720, label: '720p' });
                   else if (val === '1080p') setResolution({ width: 1920, height: 1080, label: '1080p' });
                 }}
-                className="w-full py-1.5 px-2 rounded bg-space-800 border border-space-700 text-space-200 disabled:opacity-50 outline-none"
+                className="w-full py-1.5 px-1.5 rounded bg-space-800 border border-space-700 text-space-200 disabled:opacity-50 outline-none"
               >
-                <option value="720p">720p (Optimal)</option>
-                <option value="480p">480p (Fast)</option>
-                <option value="1080p">1080p (FHD)</option>
+                <option value="720p">720p</option>
+                <option value="480p">480p</option>
+                <option value="1080p">1080p</option>
+              </select>
+            </div>
+
+            {/* Target FPS Selector */}
+            <div>
+              <label className="text-[10px] text-space-400 block mb-1">TARGET FPS</label>
+              <select
+                disabled={isStreaming}
+                value={targetFps}
+                onChange={(e) => setTargetFps(Number(e.target.value))}
+                className="w-full py-1.5 px-1.5 rounded bg-space-800 border border-space-700 text-space-200 disabled:opacity-50 outline-none"
+              >
+                <option value={30}>30 FPS</option>
+                <option value={24}>24 FPS</option>
+                <option value={15}>15 FPS</option>
               </select>
             </div>
           </div>
