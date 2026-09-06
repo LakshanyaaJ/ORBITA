@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -236,10 +237,13 @@ class ActionClassifier:
 
     def __init__(self, config):
         self.confidence_threshold = config.action_confidence_min
+        self._config = config
         self._model = None
         self._torch = None
+        self._active_checkpoint_path = ""
 
         ModelClass, torch_module = _build_model()
+        self._ModelClass = ModelClass
         if ModelClass is not None:
             self._torch = torch_module
             self._try_load_model(ModelClass, config)
@@ -292,6 +296,38 @@ class ActionClassifier:
             logger.warning("Torch inference error: %s — falling back to heuristic.", exc)
             return _heuristic_predict(window, self.confidence_threshold)
 
+    @property
+    def active_checkpoint_path(self) -> str:
+        return self._active_checkpoint_path
+
+    def load_checkpoint(self, checkpoint_path: str) -> bool:
+        """Dynamically reload GRU action recognition model weights."""
+        if not os.path.exists(checkpoint_path):
+            logger.warning("Cannot load GRU checkpoint from non-existent path: %s", checkpoint_path)
+            return False
+        if self._ModelClass is None or self._torch is None:
+            logger.warning("PyTorch or ModelClass not available to load GRU checkpoint.")
+            return False
+        try:
+            torch = self._torch
+            f_dim = getattr(self._config, "feature_dim", 64)
+            h_dim = getattr(self._config, "hidden_dim", 128)
+            n_layers = getattr(self._config, "num_layers", 2)
+            model = self._ModelClass(
+                input_dim=f_dim,
+                hidden_dim=h_dim,
+                num_layers=n_layers,
+            )
+            state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+            model.load_state_dict(state)
+            self._model = model
+            self._active_checkpoint_path = str(Path(checkpoint_path).resolve())
+            logger.info("Successfully hot-reloaded GRU checkpoint from %s", checkpoint_path)
+            return True
+        except Exception as exc:
+            logger.error("Failed to hot-reload GRU checkpoint from %s: %s", checkpoint_path, exc)
+            return False
+
     def _try_load_model(self, ModelClass, config) -> None:
         checkpoint_path = config.checkpoint_path
         if not os.path.exists(checkpoint_path):
@@ -307,6 +343,7 @@ class ActionClassifier:
             state = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
             model.load_state_dict(state)
             self._model = model
+            self._active_checkpoint_path = str(Path(checkpoint_path).resolve())
             logger.info("GRU checkpoint loaded from %s", checkpoint_path)
         except Exception as exc:
             logger.warning("Failed to load GRU checkpoint: %s", exc)

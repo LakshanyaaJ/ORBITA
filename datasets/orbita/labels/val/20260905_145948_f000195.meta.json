@@ -1,0 +1,57 @@
+{
+  "image_name": "20260905_145948_f000195.jpg",
+  "image_path": "C:\\project\\ORBITA\\datasets\\orbita\\images\\val\\20260905_145948_f000195.jpg",
+  "label_path": "C:\\project\\ORBITA\\datasets\\orbita\\labels\\val\\20260905_145948_f000195.txt",
+  "meta_path": "C:\\project\\ORBITA\\datasets\\orbita\\labels\\val\\20260905_145948_f000195.meta.json",
+  "status": "verified",
+  "boxes": [
+    {
+      "class_id": 0,
+      "class_name": "PERSON",
+      "x_center": 0.172222,
+      "y_center": 0.706641,
+      "width": 0.344444,
+      "height": 0.144531,
+      "confidence": 0.654
+    },
+    {
+      "class_id": 1,
+      "class_name": "MAIN_BOX",
+      "x_center": 0.231944,
+      "y_center": 0.551172,
+      "width": 0.283333,
+      "height": 0.128906,
+      "confidence": 0.9
+    },
+    {
+      "class_id": 3,
+      "class_name": "YELLOW_BOX",
+      "x_center": 0.771528,
+      "y_center": 0.353125,
+      "width": 0.243056,
+      "height": 0.135937,
+      "confidence": 0.679
+    },
+    {
+      "class_id": 2,
+      "class_name": "RED_BOX",
+      "x_center": 0.42,
+      "y_center": 0.46,
+      "width": 0.2,
+      "height": 0.14,
+      "confidence": 0.86
+    },
+    {
+      "class_id": 4,
+      "class_name": "SAMPLE",
+      "x_center": 0.35,
+      "y_center": 0.4,
+      "width": 0.09,
+      "height": 0.09,
+      "confidence": 0.84
+    }
+  ],
+  "annotated_by": "orbita_yolo_assistant",
+  "verified_by": "mission_specialist_reviewer",
+  "verification_notes": "Full experiment object ontology verified and confirmed against physical procedure."
+}

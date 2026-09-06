@@ -1,0 +1,15 @@
+# ORBITA Dataset V3 Configuration (Video-Level Anti-Leakage Split)
+path: C:/project/ORBITA/datasets/orbita/v3
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: PERSON
+  1: MAIN_BOX
+  2: RED_BOX
+  3: YELLOW_BOX
+  4: SAMPLE
+  5: TOOL
+
+nc: 6

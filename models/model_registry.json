@@ -1,0 +1,1166 @@
+{
+  "orbita_har_gru_v1": {
+    "version": "orbita_har_gru_v1",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T06:10:11.344297+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v1\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 1.8852
+    },
+    "promotion_notes": "Demoted by orbita_har_gru_v13"
+  },
+  "orbita_har_gru_v2": {
+    "version": "orbita_har_gru_v2",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T06:13:17.863851+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v2\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.3375,
+      "f1_score": 0.3307,
+      "loss": 2.4437
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.3375) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v3": {
+    "version": "orbita_har_gru_v3",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T06:13:48.245525+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v3\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.225,
+      "f1_score": 0.2205,
+      "loss": 2.7198
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.2250) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v4": {
+    "version": "orbita_har_gru_v4",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:21:58.443556+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v4\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.0775
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v5": {
+    "version": "orbita_har_gru_v5",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:22:37.511622+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v5\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.1077
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v6": {
+    "version": "orbita_har_gru_v6",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:23:21.834953+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v6\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.4375,
+      "f1_score": 0.4287,
+      "loss": 2.2018
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4375) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v7": {
+    "version": "orbita_har_gru_v7",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:23:57.739494+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v7\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.1858
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v8": {
+    "version": "orbita_har_gru_v8",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:24:29.243837+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v8\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.3375,
+      "f1_score": 0.3307,
+      "loss": 2.214
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.3375) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v9": {
+    "version": "orbita_har_gru_v9",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:25:33.351871+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v9\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.2553
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v10": {
+    "version": "orbita_har_gru_v10",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:26:03.429422+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v10\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.1072
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v11": {
+    "version": "orbita_har_gru_v11",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:26:37.230501+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v11\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.033
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v12": {
+    "version": "orbita_har_gru_v12",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:26:40.385003+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v12\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.0152
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4500)"
+  },
+  "orbita_har_gru_v13": {
+    "version": "orbita_har_gru_v13",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:26:54.956435+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v13\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.4625,
+      "f1_score": 0.4532,
+      "loss": 2.508
+    },
+    "promotion_notes": "Demoted by orbita_har_gru_v32"
+  },
+  "orbita_har_gru_v14": {
+    "version": "orbita_har_gru_v14",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:27:32.837803+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v14\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.325,
+      "f1_score": 0.3185,
+      "loss": 2.551
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.3250) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v15": {
+    "version": "orbita_har_gru_v15",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:27:36.216208+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v15\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.0058
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v16": {
+    "version": "orbita_har_gru_v16",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:28:25.972440+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v16\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.121
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v17": {
+    "version": "orbita_har_gru_v17",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:28:29.009776+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v17\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.4375,
+      "f1_score": 0.4287,
+      "loss": 2.2272
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4375) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v18": {
+    "version": "orbita_har_gru_v18",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:28:44.326947+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v18\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.5276
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v19": {
+    "version": "orbita_har_gru_v19",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:29:22.200132+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v19\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.1069
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v20": {
+    "version": "orbita_har_gru_v20",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T07:29:25.467480+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v20\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.2209
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v21": {
+    "version": "orbita_har_gru_v21",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T09:22:21.875376+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v21\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.4375,
+      "f1_score": 0.4287,
+      "loss": 2.5314
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4375) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v22": {
+    "version": "orbita_har_gru_v22",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T09:23:01.205234+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v22\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.1588
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v23": {
+    "version": "orbita_har_gru_v23",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T09:23:04.545724+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v23\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.1392
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v24": {
+    "version": "orbita_har_gru_v24",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T09:49:58.878957+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v24\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.4375,
+      "f1_score": 0.4287,
+      "loss": 2.669
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4375) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v25": {
+    "version": "orbita_har_gru_v25",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T09:50:59.720272+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v25\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.1238
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v26": {
+    "version": "orbita_har_gru_v26",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T09:51:07.109648+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v26\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.2692
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_yolo_detector_v1": {
+    "version": "orbita_yolo_detector_v1",
+    "model_type": "yolo_detector",
+    "created_at": "2026-09-06T09:57:25.327576+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_yolo_detector_v1\\best.pt",
+    "dataset_version": "v1",
+    "training_samples_count": 12,
+    "classes": [
+      "PERSON",
+      "MAIN_BOX",
+      "RED_BOX",
+      "YELLOW_BOX",
+      "SAMPLE",
+      "TOOL"
+    ],
+    "is_production": true,
+    "metrics": {
+      "precision": 0.0064,
+      "recall": 0.463,
+      "mAP50": 0.1411,
+      "mAP50-95": 0.0675
+    },
+    "promotion_notes": "Official V1 Baseline"
+  },
+  "orbita_har_gru_v27": {
+    "version": "orbita_har_gru_v27",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T09:57:56.984831+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v27\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.6247
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v28": {
+    "version": "orbita_har_gru_v28",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T10:00:03.671007+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v28\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.3167
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v29": {
+    "version": "orbita_har_gru_v29",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T10:00:11.385437+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v29\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.4583
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v30": {
+    "version": "orbita_har_gru_v30",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T10:00:36.860020+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v30\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.5051
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (0.4625)"
+  },
+  "orbita_har_gru_v31": {
+    "version": "orbita_har_gru_v31",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T10:40:58.372999+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v31\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.4375,
+      "f1_score": 0.4287,
+      "loss": 2.6751
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4375) did not beat production (0.4625)"
+  },
+  "orbita_yolo_detector_v2": {
+    "version": "orbita_yolo_detector_v2",
+    "model_type": "yolo_detector",
+    "created_at": "2026-09-06T10:58:14.100488+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_yolo_detector_v2\\best.pt",
+    "dataset_version": "v2",
+    "training_samples_count": 73,
+    "classes": [
+      "PERSON",
+      "MAIN_BOX",
+      "RED_BOX",
+      "YELLOW_BOX",
+      "SAMPLE",
+      "TOOL"
+    ],
+    "is_production": false,
+    "metrics": {
+      "precision": 0.00030563784266704285,
+      "recall": 0.07103825136612021,
+      "mAP50": 0.0003228804440945763,
+      "mAP50-95": 5.469217051221527e-05
+    },
+    "promotion_notes": "Promotion rejected: mAP50 (0.0003) did not beat production (0.1411)"
+  },
+  "orbita_har_gru_v32": {
+    "version": "orbita_har_gru_v32",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T10:59:48.094433+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v32\\orbita_gru_v2.pth",
+    "dataset_version": "v2",
+    "training_samples_count": 540,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": true,
+    "metrics": {
+      "accuracy": 1.0,
+      "f1_score": 1.0,
+      "loss": 0.003
+    },
+    "promotion_notes": "Promoted: accuracy improved from 0.4625 to 1.0000 (+0.5375)"
+  },
+  "orbita_har_gru_v33": {
+    "version": "orbita_har_gru_v33",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T11:00:09.833745+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v33\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.3375,
+      "f1_score": 0.3307,
+      "loss": 2.6992
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.3375) did not beat production (1.0000)"
+  },
+  "orbita_har_gru_v34": {
+    "version": "orbita_har_gru_v34",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T11:01:11.523238+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v34\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.0499
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (1.0000)"
+  },
+  "orbita_har_gru_v35": {
+    "version": "orbita_har_gru_v35",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T11:01:19.188004+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v35\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.3375,
+      "f1_score": 0.3307,
+      "loss": 2.662
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.3375) did not beat production (1.0000)"
+  },
+  "orbita_har_gru_v36": {
+    "version": "orbita_har_gru_v36",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T12:46:31.726552+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v36\\orbita_gru_v3.pth",
+    "dataset_version": "v3",
+    "training_samples_count": 630,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 1.0,
+      "f1_score": 1.0,
+      "validation_accuracy": 1.0
+    },
+    "promotion_notes": "Promotion rejected: accuracy (1.0000) did not beat production (1.0000)"
+  },
+  "orbita_yolo_detector_v3": {
+    "version": "orbita_yolo_detector_v3",
+    "model_type": "yolo_detector",
+    "created_at": "2026-09-06T13:22:09.766458+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_yolo_detector_v3\\best.pt",
+    "dataset_version": "v3",
+    "training_samples_count": 266,
+    "classes": [
+      "PERSON",
+      "MAIN_BOX",
+      "RED_BOX",
+      "YELLOW_BOX",
+      "SAMPLE",
+      "TOOL"
+    ],
+    "is_production": false,
+    "metrics": {
+      "precision": 0.37032560632082623,
+      "recall": 0.07352941176470588,
+      "mAP50": 0.04707440691730564,
+      "mAP50-95": 0.014650312587782125
+    },
+    "promotion_notes": "Promotion rejected: mAP50 (0.0471) did not beat production (0.1411)"
+  },
+  "orbita_har_gru_v37": {
+    "version": "orbita_har_gru_v37",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T13:22:36.702904+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v37\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.4762
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (1.0000)"
+  },
+  "orbita_har_gru_v38": {
+    "version": "orbita_har_gru_v38",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T13:23:47.356335+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v38\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.1488
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (1.0000)"
+  },
+  "orbita_har_gru_v39": {
+    "version": "orbita_har_gru_v39",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T13:23:58.936832+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v39\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.3375,
+      "f1_score": 0.3307,
+      "loss": 2.2723
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.3375) did not beat production (1.0000)"
+  },
+  "orbita_har_gru_v40": {
+    "version": "orbita_har_gru_v40",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T14:47:20.738418+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v40\\orbita_gru.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.6551
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (1.0000)"
+  },
+  "orbita_har_gru_v41": {
+    "version": "orbita_har_gru_v41",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T14:48:00.108156+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v41\\orbita_gru_v1.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.4375,
+      "f1_score": 0.4287,
+      "loss": 2.4716
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4375) did not beat production (1.0000)"
+  },
+  "orbita_har_gru_v42": {
+    "version": "orbita_har_gru_v42",
+    "model_type": "har_gru",
+    "created_at": "2026-09-06T14:48:03.611156+00:00",
+    "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_har_gru_v42\\orbita_gru_v2.pth",
+    "dataset_version": "v1",
+    "training_samples_count": 320,
+    "classes": [
+      "IDLE",
+      "OPEN",
+      "TAKE",
+      "PLACE",
+      "TRANSFER",
+      "CLOSE",
+      "ACTIVATE",
+      "PERFORM",
+      "STORE"
+    ],
+    "is_production": false,
+    "metrics": {
+      "accuracy": 0.45,
+      "f1_score": 0.441,
+      "loss": 2.041
+    },
+    "promotion_notes": "Promotion rejected: accuracy (0.4500) did not beat production (1.0000)"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "total_videos": 3,
+  "unique_experiments": 1,
+  "experiment_ids": [
+    "EXP_REF_01"
+  ],
+  "total_duration_seconds": 60.45,
+  "total_frames": 1814,
+  "average_fps": 30.01,
+  "resolutions": [
+    "2160x3840"
+  ],
+  "codecs": [
+    "hevc"
+  ],
+  "has_annotations": false,
+  "videos": [
+    {
+      "video_id": "20260905_145858",
+      "file_name": "20260905_145858.mp4",
+      "file_path": "C:\\project\\ORBITA\\vdata\\20260905_145858.mp4",
+      "file_size_bytes": 120871292,
+      "file_size_mb": 115.27,
+      "experiment_id": "EXP_REF_01",
+      "duration_seconds": 23.46,
+      "total_frames": 704,
+      "fps": 30.01,
+      "width": 2160,
+      "height": 3840,
+      "aspect_ratio": "2160:3840",
+      "codec": "hevc",
+      "has_annotations": false,
+      "annotation_format": null
+    },
+    {
+      "video_id": "20260905_145948",
+      "file_name": "20260905_145948.mp4",
+      "file_path": "C:\\project\\ORBITA\\vdata\\20260905_145948.mp4",
+      "file_size_bytes": 104653688,
+      "file_size_mb": 99.81,
+      "experiment_id": "EXP_REF_01",
+      "duration_seconds": 20.33,
+      "total_frames": 610,
+      "fps": 30.0,
+      "width": 2160,
+      "height": 3840,
+      "aspect_ratio": "2160:3840",
+      "codec": "hevc",
+      "has_annotations": false,
+      "annotation_format": null
+    },
+    {
+      "video_id": "20260905_150132",
+      "file_name": "20260905_150132.mp4",
+      "file_path": "C:\\project\\ORBITA\\vdata\\20260905_150132.mp4",
+      "file_size_bytes": 85796619,
+      "file_size_mb": 81.82,
+      "experiment_id": "EXP_REF_01",
+      "duration_seconds": 16.66,
+      "total_frames": 500,
+      "fps": 30.02,
+      "width": 2160,
+      "height": 3840,
+      "aspect_ratio": "2160:3840",
+      "codec": "hevc",
+      "has_annotations": false,
+      "annotation_format": null
+    }
+  ]
+}

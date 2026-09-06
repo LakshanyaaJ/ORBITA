@@ -39,6 +39,9 @@ class ValidationResult:
     detected_objects: list[DetectedObject] = field(default_factory=list)
     fps: float = 0.0
     latency_ms: float = 0.0
+    left_hand: Any = None
+    right_hand: Any = None
+    interactions: list[Any] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = self.fsm_state.to_dict()
@@ -56,6 +59,68 @@ class ValidationResult:
             d["next_action"] = self.action_prediction.next_action
             d["next_confidence"] = round(self.action_prediction.next_confidence, 3)
             d["is_uncertain"] = self.action_prediction.is_uncertain
+
+        # Rich Hand Telemetry
+        primary_int = None
+        if self.interactions:
+            # Sort by HOLDING > CONTACT > NEAR
+            candidates = sorted(self.interactions, key=lambda x: (getattr(x, "state", 0), getattr(x, "confidence", 0)), reverse=True)
+            if candidates:
+                primary_int = candidates[0]
+
+        d["hand_telemetry"] = {
+            "left": {
+                "hand_id": getattr(self.left_hand, "hand_id", -1),
+                "tracked": getattr(self.left_hand, "is_visible", False),
+                "confidence": round(getattr(self.left_hand, "confidence", 0.0), 3),
+                "status": getattr(self.left_hand, "track_status", "LOST"),
+                "speed_px_s": round(getattr(self.left_hand, "speed", 0.0), 1),
+                "landmarks_count": 21 if (getattr(self.left_hand, "finger_landmarks", None) is not None) else 0,
+            },
+            "right": {
+                "hand_id": getattr(self.right_hand, "hand_id", -1),
+                "tracked": getattr(self.right_hand, "is_visible", False),
+                "confidence": round(getattr(self.right_hand, "confidence", 0.0), 3),
+                "status": getattr(self.right_hand, "track_status", "LOST"),
+                "speed_px_s": round(getattr(self.right_hand, "speed", 0.0), 1),
+                "landmarks_count": 21 if (getattr(self.right_hand, "finger_landmarks", None) is not None) else 0,
+            },
+            "primary_interaction": {
+                "hand_side": getattr(primary_int, "hand_side", ""),
+                "object_class": getattr(primary_int, "object_class", ""),
+                "state": getattr(getattr(primary_int, "state", None), "name", "NOT_INTERACTING"),
+                "confidence": round(getattr(primary_int, "confidence", 0.0), 3),
+                "is_holding": getattr(primary_int, "is_holding", False),
+                "transfer_event": getattr(primary_int, "transfer_event", None),
+            } if primary_int else None,
+        }
+
+        # Critical Perception Debug Mode breakdown
+        raw_yolo = [
+            {"class": o.class_name, "conf": round(float(o.confidence), 3), "bbox": list(o.bbox)}
+            for o in self.detected_objects if getattr(o, "source", "") == "yolo"
+        ]
+        hybrid = [
+            {"class": o.class_name, "conf": round(float(o.confidence), 3), "bbox": list(o.bbox)}
+            for o in self.detected_objects if getattr(o, "source", "") == "chroma"
+        ]
+        d["perception_debug"] = {
+            "raw_yolo": raw_yolo,
+            "hybrid": hybrid,
+            "hand": {
+                "left": f"LEFT_HAND {round(float(getattr(self.left_hand, 'confidence', 0.0)), 2)}" if getattr(self.left_hand, 'is_visible', False) else "NOT_DETECTED",
+                "right": f"RIGHT_HAND {round(float(getattr(self.right_hand, 'confidence', 0.0)), 2)}" if getattr(self.right_hand, 'is_visible', False) else "NOT_DETECTED",
+            },
+            "tracks": [
+                f"{o.class_name} #{o.track_id}" for o in self.detected_objects if getattr(o, "track_id", -1) > 0
+            ] + ([f"LEFT_HAND #{self.left_hand.hand_id}"] if getattr(self.left_hand, "is_visible", False) else [])
+              + ([f"RIGHT_HAND #{self.right_hand.hand_id}"] if getattr(self.right_hand, "is_visible", False) else []),
+            "interactions": [
+                f"HAND #{getattr(i, 'hand_side', '')} <-> {getattr(i, 'object_class', '')} = {getattr(getattr(i, 'state', None), 'name', str(getattr(i, 'state', '')))}"
+                for i in self.interactions if getattr(i, "state", 0) != 0
+            ],
+        }
+
         return d
 
 
@@ -101,6 +166,7 @@ class StateManager:
             steps=config.experiment_steps,
             experiment_id=self.experiment_id,
             confidence_threshold=config.har.action_confidence_min,
+            confirmation_frames_required=3,
         )
 
         self._last_voice_message: str = ""
@@ -119,6 +185,9 @@ class StateManager:
         detected_objects: list[DetectedObject],
         fps: float = 0.0,
         latency_ms: float = 0.0,
+        left_hand: Any = None,
+        right_hand: Any = None,
+        interactions: Optional[list[Any]] = None,
     ) -> ValidationResult:
         """
         Process one action prediction and return complete validation result.
@@ -128,6 +197,9 @@ class StateManager:
             detected_objects: Current frame's detected objects
             fps: Current processing frame rate
             latency_ms: Current end-to-end latency
+            left_hand: Tracked left hand state
+            right_hand: Tracked right hand state
+            interactions: List of active hand-object interactions
 
         Returns:
             ValidationResult
@@ -137,7 +209,7 @@ class StateManager:
         detected_object = (
             prediction.target_object
             if prediction.target_object is not None
-            else self._resolve_object(prediction, detected_objects)
+            else self._resolve_object(prediction, detected_objects, interactions)
         )
 
         # Run FSM
@@ -179,6 +251,9 @@ class StateManager:
             detected_objects=detected_objects,
             fps=fps,
             latency_ms=latency_ms,
+            left_hand=left_hand,
+            right_hand=right_hand,
+            interactions=interactions or [],
         )
 
     def reset(self) -> None:
@@ -200,13 +275,26 @@ class StateManager:
         self,
         prediction: ActionPrediction,
         detected_objects: list[DetectedObject],
+        interactions: Optional[list[Any]] = None,
     ) -> str:
         """
         Determine which object the action is performed on.
-
-        Strategy: find the object closest to the primary interaction
-        (by highest confidence detection of action-relevant class).
+        Prioritizes direct physical interactions (HOLDING, CONTACT) over distance heuristics.
         """
+        # 1. First check physical interactions from hand tracking
+        if interactions:
+            # Check for actively held objects
+            holding = [i for i in interactions if getattr(i, "is_holding", False)]
+            if holding:
+                best_hold = max(holding, key=lambda x: getattr(x, "confidence", 0.0))
+                return best_hold.object_class
+
+            # Check for contact objects
+            contact = [i for i in interactions if getattr(getattr(i, "state", None), "name", "") in ("CONTACT", "RELEASING")]
+            if contact:
+                best_contact = max(contact, key=lambda x: getattr(x, "confidence", 0.0))
+                return best_contact.object_class
+
         if not detected_objects:
             return ""
 

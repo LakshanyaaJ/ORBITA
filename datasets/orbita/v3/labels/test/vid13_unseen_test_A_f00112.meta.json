@@ -1,0 +1,16 @@
+{
+  "frame_id": "vid13_unseen_test_A_f00112",
+  "trial_id": "vid13_unseen_test_A",
+  "split": "test",
+  "source_video": "20260905_150132.mp4",
+  "source_frame": 112,
+  "status": "verified",
+  "verified_by": "lead_ml_engineer",
+  "dataset_version": "v3",
+  "warp_type": "none",
+  "photometric": {
+    "gain": 1.0,
+    "bias": 0
+  },
+  "objects_count": 6
+}

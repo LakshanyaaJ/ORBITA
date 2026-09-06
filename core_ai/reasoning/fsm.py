@@ -128,6 +128,7 @@ class ExperimentFSM:
         steps: list[ExperimentStep],
         experiment_id: str = "EXP001",
         confidence_threshold: float = 0.55,
+        confirmation_frames_required: int = 1,
     ):
         if not steps:
             raise ValueError("FSM requires at least one experiment step.")
@@ -135,6 +136,7 @@ class ExperimentFSM:
         self.steps = steps
         self.experiment_id = experiment_id
         self.confidence_threshold = confidence_threshold
+        self.confirmation_frames_required = confirmation_frames_required
 
         # Mutable FSM state
         self._current_idx: int = 0
@@ -146,6 +148,22 @@ class ExperimentFSM:
         self._last_status: FSMStatus = FSMStatus.WAITING
         self._last_detected_action: str = "IDLE"
         self._last_detected_object: str = ""
+        self._consecutive_matches: int = 0
+        self._consecutive_errors: int = 0
+
+    @property
+    def is_complete(self) -> bool:
+        return self._current_idx >= len(self.steps)
+
+    @property
+    def current_step_idx(self) -> int:
+        return self._current_idx
+
+    @property
+    def current_step(self) -> Optional[ExperimentStep]:
+        if self._current_idx < len(self.steps):
+            return self.steps[self._current_idx]
+        return None
 
     # ----------------------------------------------------------------------- #
     # Core processing
@@ -156,20 +174,6 @@ class ExperimentFSM:
         detected_object: str = "",
         confidence: float = 1.0,
     ) -> FSMState:
-        """
-        Evaluate detected action against the current expected step.
-
-        This is the FSM's primary entry point. Called once per frame
-        (or per stable action classification).
-
-        Args:
-            detected_action: e.g. "TAKE", "OPEN", "IDLE"
-            detected_object: e.g. "RED_BOX", "YELLOW_BOX"
-            confidence: Action classification confidence [0, 1]
-
-        Returns:
-            FSMState snapshot
-        """
         self._last_detected_action = detected_action
         self._last_detected_object = detected_object
         now = time.time()
@@ -183,31 +187,43 @@ class ExperimentFSM:
 
         # --- UNCERTAIN ---
         if confidence < self.confidence_threshold:
+            self._consecutive_matches = 0
+            self._consecutive_errors = 0
             return self._make_state(FSMStatus.UNCERTAIN, current, next_step, now,
                                     error="UNCERTAIN")
 
         # --- IDLE — nothing happening ---
         if detected_action in ("IDLE", "", "UNKNOWN"):
+            self._consecutive_matches = 0
+            self._consecutive_errors = 0
             return self._make_state(FSMStatus.WAITING, current, next_step, now)
 
         # --- Build full detected action label ---
-        detected_full = f"{detected_action}_{detected_object}" if detected_object else detected_action
-
-        # --- Check against current expected action ---
         expected_action = current.action  # e.g. "TAKE_RED_BOX"
         expected_verb, expected_obj = self._split_action(expected_action)
 
         detected_verb, detected_obj = detected_action.upper(), detected_object.upper()
 
-        # CORRECT match
+        # CORRECT match with temporal confirmation
         if self._matches(detected_verb, detected_obj, expected_action):
-            self._advance()
-            new_idx = self._current_idx
-            new_current = self.steps[new_idx] if new_idx < len(self.steps) else None
-            new_next = self.steps[new_idx + 1] if new_idx + 1 < len(self.steps) else None
-            if new_current is None:
-                return self._make_state(FSMStatus.COMPLETED, None, None, now)
-            return self._make_state(FSMStatus.CORRECT, current, next_step, now)
+            self._consecutive_matches += 1
+            self._consecutive_errors = 0
+            if self._consecutive_matches >= self.confirmation_frames_required:
+                self._consecutive_matches = 0
+                self._advance()
+                new_idx = self._current_idx
+                new_current = self.steps[new_idx] if new_idx < len(self.steps) else None
+                new_next = self.steps[new_idx + 1] if new_idx + 1 < len(self.steps) else None
+                if new_current is None:
+                    return self._make_state(FSMStatus.COMPLETED, None, None, now)
+                return self._make_state(FSMStatus.CORRECT, current, next_step, now)
+            else:
+                return self._make_state(FSMStatus.WAITING, current, next_step, now,
+                                        recovery=f"Action recognized, confirming ({self._consecutive_matches}/{self.confirmation_frames_required})...")
+
+        # Not a match -> reset match counter
+        self._consecutive_matches = 0
+        self._consecutive_errors += 1
 
         # REPEATED — already completed
         if current.id in self._completed_ids:
@@ -215,10 +231,10 @@ class ExperimentFSM:
                                     error="REPEATED_ACTION",
                                     recovery=f"Step {current.id} already completed.")
 
-        # WRONG_OBJECT — correct verb, wrong object (check BEFORE step-skip)
-        # This catches cases like TAKE_YELLOW_BOX when TAKE_RED_BOX expected.
+        # WRONG_OBJECT — correct verb, wrong object (require 2 consecutive frames before latching error)
         if detected_verb == expected_verb and expected_obj and detected_obj and detected_obj != expected_obj:
-            self._failed_ids.append(current.id)
+            if self._consecutive_errors >= 2 and current.id not in self._failed_ids:
+                self._failed_ids.append(current.id)
             return self._make_state(FSMStatus.WRONG_OBJECT, current, next_step, now,
                                     error="WRONG_OBJECT",
                                     recovery=f"Wrong object. Expected: {expected_obj.replace('_', ' ').lower()}.")
@@ -226,8 +242,9 @@ class ExperimentFSM:
         # STEP_SKIPPED — detected action matches a future step (exact verb+obj match required)
         for future_step in self.steps[self._current_idx + 1:]:
             if self._matches_strict(detected_verb, detected_obj, future_step.action):
-                self._failed_ids.append(current.id)
-                self._skipped_ids.append(current.id)
+                if self._consecutive_errors >= 2 and current.id not in self._failed_ids:
+                    self._failed_ids.append(current.id)
+                    self._skipped_ids.append(current.id)
                 return self._make_state(FSMStatus.STEP_SKIPPED, current, next_step, now,
                                         error="STEP_SKIPPED",
                                         recovery=f"Please complete step {current.id}: {current.label} first.")
@@ -240,7 +257,8 @@ class ExperimentFSM:
                                         recovery=f"Step {past_step.id} is already done. Please proceed with step {current.id}.")
 
         # WRONG_ACTION — completely different
-        self._failed_ids.append(current.id)
+        if self._consecutive_errors >= 2 and current.id not in self._failed_ids:
+            self._failed_ids.append(current.id)
         return self._make_state(FSMStatus.WRONG_ACTION, current, next_step, now,
                                 error="WRONG_ACTION",
                                 recovery=f"Incorrect action. Please: {current.label}.")
@@ -254,6 +272,8 @@ class ExperimentFSM:
         self._start_time = time.time()
         self._step_start = time.time()
         self._last_status = FSMStatus.WAITING
+        self._consecutive_matches = 0
+        self._consecutive_errors = 0
         logger.info("FSM reset.")
 
     def get_current_state(self) -> FSMState:

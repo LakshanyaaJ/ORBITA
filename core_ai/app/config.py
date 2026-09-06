@@ -84,10 +84,11 @@ class PoseConfig:
 # --------------------------------------------------------------------------- #
 @dataclass
 class HandConfig:
-    backend: str = "pose"           # "pose" (wrist from pose) | "mediapipe"
+    backend: str = "mediapipe"      # "mediapipe" (direct hands) | "pose" (wrist from pose)
     mediapipe_max_hands: int = 2
-    mediapipe_detection_confidence: float = 0.50
-    mediapipe_tracking_confidence: float = 0.50
+    mediapipe_detection_confidence: float = 0.35
+    mediapipe_tracking_confidence: float = 0.35
+    mediapipe_model_path: str = str(MODELS_DIR / "hand_landmarker.task")
 
 
 # --------------------------------------------------------------------------- #

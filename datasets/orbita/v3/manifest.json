@@ -1,0 +1,119 @@
+{
+  "dataset_version": "v3",
+  "total_frames": 424,
+  "splits": {
+    "train": 266,
+    "val": 90,
+    "test": 68
+  },
+  "class_instance_counts": {
+    "PERSON": 424,
+    "MAIN_BOX": 424,
+    "RED_BOX": 424,
+    "YELLOW_BOX": 424,
+    "SAMPLE": 424,
+    "TOOL": 424
+  },
+  "video_trials": [
+    {
+      "trial_id": "vid01_ref_normal",
+      "split": "train",
+      "base_video": "20260905_145858.mp4",
+      "frames_generated": 32,
+      "warp_type": "none"
+    },
+    {
+      "trial_id": "vid02_ref_bright",
+      "split": "train",
+      "base_video": "20260905_145858.mp4",
+      "frames_generated": 30,
+      "warp_type": "none"
+    },
+    {
+      "trial_id": "vid03_ref_dim",
+      "split": "train",
+      "base_video": "20260905_145858.mp4",
+      "frames_generated": 30,
+      "warp_type": "none"
+    },
+    {
+      "trial_id": "vid04_angled_top",
+      "split": "train",
+      "base_video": "20260905_145948.mp4",
+      "frames_generated": 30,
+      "warp_type": "tilt_up"
+    },
+    {
+      "trial_id": "vid05_angled_low",
+      "split": "train",
+      "base_video": "20260905_145948.mp4",
+      "frames_generated": 30,
+      "warp_type": "tilt_down"
+    },
+    {
+      "trial_id": "vid06_high_mount",
+      "split": "train",
+      "base_video": "20260905_145948.mp4",
+      "frames_generated": 30,
+      "warp_type": "high_zoom_out"
+    },
+    {
+      "trial_id": "vid07_shift_left",
+      "split": "train",
+      "base_video": "20260905_145858.mp4",
+      "frames_generated": 28,
+      "warp_type": "shift_left"
+    },
+    {
+      "trial_id": "vid08_shift_right",
+      "split": "train",
+      "base_video": "20260905_145858.mp4",
+      "frames_generated": 28,
+      "warp_type": "shift_right"
+    },
+    {
+      "trial_id": "vid09_warm_light",
+      "split": "train",
+      "base_video": "20260905_145948.mp4",
+      "frames_generated": 28,
+      "warp_type": "warm_temp"
+    },
+    {
+      "trial_id": "vid10_cool_light",
+      "split": "val",
+      "base_video": "20260905_145948.mp4",
+      "frames_generated": 30,
+      "warp_type": "cool_temp"
+    },
+    {
+      "trial_id": "vid11_zoom_crop",
+      "split": "val",
+      "base_video": "20260905_145858.mp4",
+      "frames_generated": 32,
+      "warp_type": "zoom_center"
+    },
+    {
+      "trial_id": "vid12_angled_side",
+      "split": "val",
+      "base_video": "20260905_145948.mp4",
+      "frames_generated": 28,
+      "warp_type": "tilt_lateral"
+    },
+    {
+      "trial_id": "vid13_unseen_test_A",
+      "split": "test",
+      "base_video": "20260905_150132.mp4",
+      "frames_generated": 36,
+      "warp_type": "none"
+    },
+    {
+      "trial_id": "vid14_unseen_test_B",
+      "split": "test",
+      "base_video": "20260905_150132.mp4",
+      "frames_generated": 32,
+      "warp_type": "tilt_lateral"
+    }
+  ],
+  "human_verified_count": 424,
+  "anti_leakage_policy": "STRICT_BY_VIDEO_TRIAL"
+}

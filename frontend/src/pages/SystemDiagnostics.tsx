@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Camera, Brain, Database, Mic, Video } from 'lucide-react';
 import { getCameraStatus } from '../api/camera';
+import DatasetControlPanel from '../components/dataset/DatasetControlPanel';
 
 export default function SystemDiagnostics() {
   const [status, setStatus] = useState<any>({
@@ -114,6 +115,9 @@ export default function SystemDiagnostics() {
           </div>
         </section>
       </div>
+
+      {/* ORBITA Closed-Loop Dataset & Model Governance Panel */}
+      <DatasetControlPanel />
     </div>
   );
 }

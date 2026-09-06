@@ -26,6 +26,8 @@ function App() {
           <Route path="/experiments/:id/live" element={<LiveExperiment />} />
           <Route path="/experiments/:id/log" element={<ExperimentLog />} />
           <Route path="/system" element={<SystemDiagnostics />} />
+          <Route path="/dataset" element={<SystemDiagnostics />} />
+          <Route path="/vdata" element={<SystemDiagnostics />} />
         </Route>
         
         {/* Unified Mission Control Route */}

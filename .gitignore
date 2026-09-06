@@ -55,3 +55,8 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Video data & captures
+vdata/
+*.mp4
+

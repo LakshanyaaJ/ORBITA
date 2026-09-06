@@ -41,6 +41,18 @@ class DetectedObject:
     timestamp: float = 0.0
     source: str = "chroma"            # "chroma" | "yolo" | "fused"
     raw_label: str = ""               # original YOLO COCO label
+    track_id: int = -1
+    velocity: tuple[float, float] = (0.0, 0.0)
+
+    @property
+    def is_yolo(self) -> bool:
+        """True if detection originated from neural YOLO model."""
+        return self.source == "yolo"
+
+    @property
+    def is_hybrid(self) -> bool:
+        """True if detection originated from or was assisted by chroma/heuristic rules."""
+        return self.source in ("chroma", "fused")
 
     @property
     def x(self) -> int:
@@ -76,20 +88,20 @@ class DetectedObject:
 # --------------------------------------------------------------------------- #
 DEFAULT_HSV_RANGES: dict[str, tuple[np.ndarray, np.ndarray]] = {
     "RED_BOX": (
-        np.array([0,   100,  70]),
-        np.array([12,  255, 255]),
+        np.array([0,   140,  70]),
+        np.array([10,  255, 255]),
     ),
     "RED_BOX_HIGH": (           # Red wraps around H=180
-        np.array([168, 100,  70]),
+        np.array([170, 140,  70]),
         np.array([180, 255, 255]),
     ),
     "YELLOW_BOX": (
         np.array([18,  90,   70]),
         np.array([38,  255, 255]),
     ),
-    "MAIN_BOX": (
-        np.array([95,  30,   30]),
-        np.array([140, 255, 200]),
+    "MAIN_BOX": (               # Expanded for blue container under bright/dim lighting
+        np.array([95,  55,   30]),
+        np.array([135, 255, 255]),
     ),
     "SAMPLE": (
         np.array([45,  70,   70]),
@@ -124,6 +136,10 @@ class ObjectDetector:
         if getattr(config, "use_yolo", True):
             self._try_load_yolo(getattr(config, "yolo_model_path", "models/yolov8n.pt"))
 
+        # Multi-object tracker for persistent identity and trajectory velocity
+        from core_ai.perception.object_tracker import MultiObjectTracker
+        self.tracker = MultiObjectTracker(max_age=15, min_hits=1, iou_threshold=0.25)
+
         # Temporal smoother to eliminate jitter & brief occlusions
         self._tracked_objects: Dict[str, Dict[str, Any]] = {}
 
@@ -134,9 +150,10 @@ class ObjectDetector:
         self,
         frame: np.ndarray,
         timestamp: float = 0.0,
+        hands: Optional[tuple[Any, Any]] = None,
     ) -> list[DetectedObject]:
         """
-        Run robust detection on a single BGR frame.
+        Run robust detection and multi-object tracking on a single BGR frame.
         """
         objects: list[DetectedObject] = []
 
@@ -148,6 +165,15 @@ class ObjectDetector:
             # 2. Secondary: Supplemental chroma check for missed experiment boxes
             found_classes = {o.class_name for o in yolo_objs}
             missing_boxes = {"RED_BOX", "YELLOW_BOX", "MAIN_BOX"} - found_classes
+            
+            # Optimization: If missing boxes are already actively tracked with high confidence, skip expensive chroma
+            if missing_boxes and hasattr(self, "tracker") and hasattr(self.tracker, "tracks"):
+                tracked_classes = {
+                    t.class_name for t in self.tracker.tracks.values()
+                    if getattr(t, "time_since_update", 0) <= 2
+                }
+                missing_boxes = missing_boxes - tracked_classes
+
             if missing_boxes:
                 chroma_objs = self._detect_chroma(
                     frame,
@@ -155,6 +181,7 @@ class ObjectDetector:
                     filter_classes=missing_boxes,
                     min_area_override=3000,
                     min_confidence_override=0.72,
+                    hands=hands,
                 )
                 # Keep chroma detections only if non-overlapping with existing YOLO detections
                 for co in chroma_objs:
@@ -162,54 +189,14 @@ class ObjectDetector:
                         objects.append(co)
         else:
             # Fallback if YOLO not available
-            objects.extend(self._detect_chroma(frame, timestamp))
+            objects.extend(self._detect_chroma(frame, timestamp, hands=hands))
 
         # 3. Apply temporal smoothing to stabilize bounding boxes
-        return self._smooth_detections(objects, timestamp)
+        smoothed = self._smooth_detections(objects, timestamp)
 
-    def draw(self, frame: np.ndarray, objects: list[DetectedObject]) -> np.ndarray:
-        """Draw bounding boxes and formatted labels onto a copy of the frame."""
-        vis = frame.copy()
-        colours = {
-            "RED_BOX": (0, 0, 220),       # Red
-            "YELLOW_BOX": (0, 220, 220),   # Yellow
-            "MAIN_BOX": (200, 100, 0),     # Cyan-Blue
-            "SAMPLE": (0, 200, 80),        # Green
-            "PERSON": (220, 220, 220),     # White
-            "TOOL": (220, 140, 20),        # Orange
-            "CHAMBER": (150, 200, 255),    # Light blue
-        }
-
-        for obj in objects:
-            colour = colours.get(obj.class_name, (180, 180, 180))
-            x, y, w, h = obj.bbox
-
-            # Draw bounding box
-            cv2.rectangle(vis, (x, y), (x + w, y + h), colour, 2)
-
-            # Construct transparent label
-            if obj.raw_label and obj.raw_label != obj.class_name:
-                label = f"{obj.class_name} [{obj.raw_label}] {obj.confidence:.2f}"
-            else:
-                label = f"{obj.class_name} {obj.confidence:.2f}"
-
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-            ty1 = max(0, y - th - 8)
-
-            # Solid background pill for text contrast
-            cv2.rectangle(vis, (x, ty1), (x + tw + 6, ty1 + th + 6), colour, -1)
-            cv2.putText(
-                vis,
-                label,
-                (x + 3, ty1 + th + 2),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.45,
-                (10, 10, 10),
-                1,
-                cv2.LINE_AA,
-            )
-
-        return vis
+        # 4. Apply multi-object tracking: persistent track IDs, velocity vectors
+        tracked = self.tracker.update(smoothed, timestamp)
+        return tracked
 
     # ----------------------------------------------------------------------- #
     # YOLO detection with Semantic & Color Mapping
@@ -225,6 +212,7 @@ class ObjectDetector:
                 frame,
                 conf=self.confidence_threshold,
                 device=self._device,
+                imgsz=getattr(self.config, "yolo_imgsz", 480),
                 verbose=False,
                 stream=False,
             )
@@ -307,14 +295,15 @@ class ObjectDetector:
             h_c, s_c, v_c = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
             total = h_c.size
             if total > 0:
-                red_px = np.count_nonzero(((h_c <= 12) | (h_c >= 168)) & (s_c > 50) & (v_c > 40))
-                yellow_px = np.count_nonzero((h_c >= 16) & (h_c <= 38) & (s_c > 50) & (v_c > 50))
-                green_px = np.count_nonzero((h_c >= 45) & (h_c <= 88) & (s_c > 45) & (v_c > 40))
-                blue_px = np.count_nonzero((h_c >= 95) & (h_c <= 140) & (v_c > 35))
+                # Real red plastic container has deep saturation (>130), unlike human skin (50-110)
+                red_px = np.count_nonzero(((h_c <= 10) | (h_c >= 170)) & (s_c > 130) & (v_c > 50))
+                yellow_px = np.count_nonzero((h_c >= 16) & (h_c <= 38) & (s_c > 70) & (v_c > 50))
+                green_px = np.count_nonzero((h_c >= 45) & (h_c <= 88) & (s_c > 55) & (v_c > 40))
+                blue_px = np.count_nonzero((h_c >= 95) & (h_c <= 135) & (s_c > 55) & (v_c > 35))
 
-                if red_px / total > 0.12:
+                if red_px / total > 0.20:
                     color = "RED"
-                elif yellow_px / total > 0.12:
+                elif yellow_px / total > 0.15:
                     color = "YELLOW"
                 elif green_px / total > 0.15:
                     color = "GREEN"
@@ -330,25 +319,20 @@ class ObjectDetector:
         if raw_lower in ("bottle", "cup", "wine glass", "bowl", "vase", "apple", "orange", "banana"):
             return "SAMPLE", max(conf, 0.85)
 
-        # Color-specific boxes
-        if color == "RED":
-            return "RED_BOX", max(conf, 0.88)
-        if color == "YELLOW":
-            return "YELLOW_BOX", max(conf, 0.88)
-        if color == "GREEN":
-            return "SAMPLE", max(conf, 0.80)
-
-        # Boxes & Containers (suitcases, backpacks, books, laptops, boxes)
-        if raw_lower in ("suitcase", "backpack", "handbag", "book", "laptop", "box", "microwave", "refrigerator", "tv"):
+        # Color-specific boxes (only for physical containers, packages, books, or unclassified box-like objects)
+        if raw_lower in ("box", "suitcase", "backpack", "handbag", "book", "package", "laptop"):
+            if color == "RED":
+                return "RED_BOX", max(conf, 0.88)
+            if color == "YELLOW":
+                return "YELLOW_BOX", max(conf, 0.88)
             if (w * h > 30000) or color == "BLUE":
                 return "MAIN_BOX", max(conf, 0.90)
             return "MAIN_BOX", max(conf, 0.82)
 
-        # Fallback by dominant color
-        if color == "RED":
-            return "RED_BOX", max(conf, 0.80)
-        if color == "YELLOW":
+        if color == "YELLOW" and raw_lower not in ("tie", "clock", "chair"):
             return "YELLOW_BOX", max(conf, 0.80)
+        if color == "BLUE" and raw_lower not in ("tie", "clock", "chair"):
+            return "MAIN_BOX", max(conf, 0.80)
 
         return raw_name, conf
 
@@ -362,12 +346,22 @@ class ObjectDetector:
         filter_classes: Optional[Set[str]] = None,
         min_area_override: Optional[int] = None,
         min_confidence_override: Optional[float] = None,
+        hands: Optional[tuple[Any, Any]] = None,
     ) -> list[DetectedObject]:
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        H, W = frame.shape[:2]
+        downscale = 2 if (W > 640 and H > 360) else 1
+        if downscale > 1:
+            frame_work = cv2.resize(frame, (W // downscale, H // downscale), interpolation=cv2.INTER_LINEAR)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        else:
+            frame_work = frame
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+
+        hsv = cv2.cvtColor(frame_work, cv2.COLOR_BGR2HSV)
         results: list[DetectedObject] = []
         seen_classes: set[str] = set()
-        frame_area = frame.shape[0] * frame.shape[1]
-        eff_min_area = min_area_override or self.min_area
+        frame_area = H * W
+        eff_min_area_scaled = (min_area_override or self.min_area) / (downscale * downscale)
         eff_min_conf = min_confidence_override or 0.55
 
         for class_name, (lower, upper) in self._hsv_ranges.items():
@@ -389,7 +383,6 @@ class ObjectDetector:
             if canonical in seen_classes:
                 continue
 
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
 
@@ -397,35 +390,105 @@ class ObjectDetector:
                 mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
             )
 
+            candidates: list[tuple[float, DetectedObject]] = []
             for cnt in contours:
-                area = cv2.contourArea(cnt)
+                raw_area = cv2.contourArea(cnt)
                 # Ignore tiny specks or huge background areas (>40% screen)
-                if area < eff_min_area or area > (frame_area * 0.40):
+                if raw_area < eff_min_area_scaled or raw_area > ((frame_area / (downscale * downscale)) * 0.40):
                     continue
 
-                x, y, w, h = cv2.boundingRect(cnt)
-                # Ignore extreme aspect ratios (lines, borders)
-                if w / (h + 1e-5) > 4.5 or h / (w + 1e-5) > 4.5:
+                area = float(raw_area * (downscale * downscale))
+                rx, ry, rw, rh = cv2.boundingRect(cnt)
+                x, y, w, h = rx * downscale, ry * downscale, rw * downscale, rh * downscale
+
+                # Ignore table fixtures / top bezel (top 8% of frame)
+                if y < int(H * 0.08):
+                    continue
+
+                # Ignore extreme aspect ratios (lines, borders, elongated arms)
+                aspect = w / (h + 1e-5)
+                if aspect > 2.5 or aspect < 0.40:
+                    continue
+
+                # Reject arms entering from left/right image borders
+                if (x <= 5 or x + w >= W - 5) and (aspect > 1.8 or aspect < 0.55):
                     continue
 
                 cx, cy = x + w // 2, y + h // 2
 
-                # Confidence heuristic
-                (_, _), radius = cv2.minEnclosingCircle(cnt)
-                circularity = area / (np.pi * radius ** 2 + 1e-6)
-                confidence = float(np.clip(0.55 + 0.35 * circularity, 0.55, 0.90))
+                # 1. Geometric Shape Validation: Container boxes are solid planar rectangles
+                rect = cv2.minAreaRect(cnt)
+                box_area = max(1.0, float(rect[1][0] * rect[1][1]))
+                rectangularity = float(raw_area / box_area)
+                solidity = float(raw_area / (rw * rh + 1e-5))
+
+                if canonical in ("RED_BOX", "YELLOW_BOX", "MAIN_BOX"):
+                    # True experiment containers possess high rectangularity and solidity
+                    # Knuckles, palm lines, and finger contours have low rectangularity (<0.50)
+                    if rectangularity < 0.52 or solidity < 0.42:
+                        continue
+
+                # 2. Organic Skin Chrominance Rejection for RED_BOX
+                # Industrial plastic containers exhibit high red saturation and red channel dominance.
+                # Human skin and palm creases have lower red purity and high green/blue values.
+                if canonical == "RED_BOX":
+                    crop_bgr = frame[y:y+h, x:x+w]
+                    if crop_bgr.size > 0:
+                        b_mean = float(np.mean(crop_bgr[:, :, 0]))
+                        g_mean = float(np.mean(crop_bgr[:, :, 1]))
+                        r_mean = float(np.mean(crop_bgr[:, :, 2]))
+                        # Ensure red dominance over green/blue and minimum red intensity
+                        if r_mean < 100.0 or (r_mean / max(1.0, g_mean)) < 1.30 or (r_mean / max(1.0, b_mean)) < 1.30:
+                            continue
+
+                # 3. Hand-Object Disambiguation & Coexistence
+                # If hand tracking data is available, verify candidate is not a sub-contour of a hand.
+                if hands and canonical == "RED_BOX":
+                    left_h, right_h = hands
+                    is_subsumed_by_hand = False
+                    for hand in (left_h, right_h):
+                        if hand is not None and getattr(hand, "is_visible", False):
+                            hx, hy, hw, hh = getattr(hand, "bbox", (0, 0, 0, 0))
+                            ix1 = max(x, hx)
+                            iy1 = max(y, hy)
+                            ix2 = min(x + w, hx + hw)
+                            iy2 = min(y + h, hy + hh)
+                            inter_area = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+                            # If candidate is mostly inside the hand bounding box:
+                            if inter_area / (w * h + 1e-5) > 0.55:
+                                # Keep as RED_BOX only if it has strong standalone evidence
+                                # of being an actual container (large area outside or high rectangularity)
+                                if rectangularity < 0.68 or area < 4500:
+                                    is_subsumed_by_hand = True
+                                    break
+                    if is_subsumed_by_hand:
+                        continue
+
+                # Score confidence from rectangularity and solidity
+                confidence = float(np.clip(0.60 + 0.22 * rectangularity + 0.15 * solidity, 0.60, 0.95))
 
                 if confidence < eff_min_conf:
                     continue
 
-                results.append(DetectedObject(
+                candidates.append((area, DetectedObject(
                     class_name=canonical,
                     confidence=confidence,
                     bbox=(x, y, w, h),
                     centroid=(cx, cy),
                     timestamp=timestamp,
                     source="chroma",
-                ))
+                )))
+
+            # If multiple candidates found for a canonical box class, prioritize by area / confidence
+            if candidates:
+                candidates.sort(key=lambda c: c[0], reverse=True)
+                kept: list[DetectedObject] = []
+                for _, obj in candidates:
+                    if not any(self._iou(obj, k) > 0.25 for k in kept):
+                        kept.append(obj)
+                        if len(kept) >= 2:
+                            break
+                results.extend(kept)
 
             seen_classes.add(canonical)
 
@@ -442,16 +505,35 @@ class ObjectDetector:
         """
         Smooths bounding box coordinates across frames to eliminate jitter
         and bridges brief detection dropouts (up to 2 frames).
+        Matches detections to existing tracks by spatial proximity, preventing
+        distinct objects of the same class from collapsing into each other.
         """
         alpha = 0.70  # EMA smoothing factor for current frame
-        updated_tracks: Dict[str, Dict[str, Any]] = {}
+        matched_prev_keys: set[str] = set()
+        smoothed_results: list[DetectedObject] = []
 
         for obj in current_objs:
-            key = obj.class_name
-            if key in self._tracked_objects:
-                prev = self._tracked_objects[key]
+            cx, cy, cw, ch = obj.bbox
+            best_match_key = None
+            best_match_dist = float("inf")
+
+            # Search existing tracks of the same class for spatial proximity
+            for key, prev in self._tracked_objects.items():
+                if prev["class_name"] != obj.class_name or key in matched_prev_keys:
+                    continue
                 px, py, pw, ph = prev["bbox"]
-                cx, cy, cw, ch = obj.bbox
+                # Spatial IoU or centroid distance check
+                iou = self._iou_bbox((px, py, pw, ph), (cx, cy, cw, ch))
+                dist = float(np.hypot((cx + cw // 2) - (px + pw // 2), (cy + ch // 2) - (py + ph // 2)))
+
+                if (iou > 0.15 or dist < 100.0) and dist < best_match_dist:
+                    best_match_key = key
+                    best_match_dist = dist
+
+            if best_match_key is not None:
+                matched_prev_keys.add(best_match_key)
+                prev = self._tracked_objects[best_match_key]
+                px, py, pw, ph = prev["bbox"]
 
                 # Smooth coordinates
                 sx = int(alpha * cx + (1 - alpha) * px)
@@ -465,38 +547,49 @@ class ObjectDetector:
                 obj.centroid = smoothed_centroid
                 obj.confidence = float(alpha * obj.confidence + (1 - alpha) * prev["confidence"])
 
-                updated_tracks[key] = {
-                    "object": obj,
-                    "bbox": smoothed_bbox,
-                    "confidence": obj.confidence,
-                    "missed_count": 0,
-                    "timestamp": timestamp,
-                }
+                prev["bbox"] = smoothed_bbox
+                prev["confidence"] = obj.confidence
+                prev["missed_count"] = 0
+                prev["timestamp"] = timestamp
+                prev["object"] = obj
+                smoothed_results.append(obj)
             else:
-                updated_tracks[key] = {
+                # New distinct object track
+                track_id = f"{obj.class_name}_{len(self._tracked_objects) + len(smoothed_results)}"
+                self._tracked_objects[track_id] = {
+                    "class_name": obj.class_name,
                     "object": obj,
                     "bbox": obj.bbox,
                     "confidence": obj.confidence,
                     "missed_count": 0,
                     "timestamp": timestamp,
                 }
+                smoothed_results.append(obj)
 
-        # Keep objects that disappeared for only 1-2 frames (retains continuity)
-        for key, prev in self._tracked_objects.items():
-            if key not in updated_tracks and prev["missed_count"] < 2:
+        # Retain objects that disappeared for only 1 frame (prevents flicker)
+        for key in list(self._tracked_objects.keys()):
+            if key not in matched_prev_keys:
+                prev = self._tracked_objects[key]
                 prev["missed_count"] += 1
-                prev["confidence"] *= 0.85
-                recovered_obj = prev["object"]
-                recovered_obj.confidence = prev["confidence"]
-                recovered_obj.timestamp = timestamp
-                updated_tracks[key] = prev
+                if prev["missed_count"] > 1:
+                    del self._tracked_objects[key]
 
-        self._tracked_objects = updated_tracks
-        return [t["object"] for t in self._tracked_objects.values()]
+        return smoothed_results
 
     # ----------------------------------------------------------------------- #
     # Utilities
     # ----------------------------------------------------------------------- #
+    @staticmethod
+    def _iou_bbox(boxA: tuple[int, int, int, int], boxB: tuple[int, int, int, int]) -> float:
+        """Intersection over Union for two (x, y, w, h) bounding boxes."""
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[0] + boxA[2], boxB[0] + boxB[2])
+        yB = min(boxA[1] + boxA[3], boxB[1] + boxB[3])
+        inter = max(0, xB - xA) * max(0, yB - yA)
+        union = float(boxA[2] * boxA[3] + boxB[2] * boxB[3] - inter)
+        return inter / (union + 1e-6) if union > 0 else 0.0
+
     @staticmethod
     def _iou(a: DetectedObject, b: DetectedObject) -> float:
         """Intersection over Union for two DetectedObjects."""
@@ -542,14 +635,17 @@ class ObjectDetector:
 
             if valid_path:
                 self._yolo = YOLO(str(valid_path))
+                self._active_model_path = str(valid_path.resolve())
                 logger.info("YOLO model loaded from %s", valid_path)
             else:
                 logger.info("YOLO model not found locally; auto-initializing from Ultralytics...")
                 self._yolo = YOLO("yolov8n.pt")
+                self._active_model_path = "yolov8n.pt"
                 target = Path("models") / "yolov8n.pt"
                 target.parent.mkdir(exist_ok=True)
                 if Path("yolov8n.pt").exists() and not target.exists():
                     Path("yolov8n.pt").rename(target)
+                    self._active_model_path = str(target.resolve())
                 logger.info("YOLO model auto-downloaded and initialized.")
 
             # Hardware acceleration
@@ -565,3 +661,87 @@ class ObjectDetector:
             logger.warning("ultralytics not installed — fallback to chroma detection.")
         except Exception as exc:
             logger.warning("Failed to load YOLO model: %s — fallback to chroma detection.", exc)
+
+    @property
+    def active_model_path(self) -> str:
+        return getattr(self, "_active_model_path", "models/yolov8n.pt")
+
+    def load_model(self, model_path: str) -> bool:
+        """Dynamically reload YOLO detector with a new version weights checkpoint."""
+        try:
+            from ultralytics import YOLO
+            p = Path(model_path)
+            if not p.exists():
+                logger.warning("Cannot load YOLO model from non-existent path: %s", model_path)
+                return False
+            new_yolo = YOLO(str(p))
+            if getattr(self, "_device", "cpu") == "cuda":
+                new_yolo.to("cuda")
+            self._yolo = new_yolo
+            self._active_model_path = str(p.resolve())
+            logger.info("Successfully hot-reloaded YOLO detector from %s", p)
+            return True
+        except Exception as exc:
+            logger.error("Failed to hot-reload YOLO detector from %s: %s", model_path, exc)
+            return False
+
+    def draw(self, frame: np.ndarray, detections: list[DetectedObject]) -> np.ndarray:
+        """
+        Draws professional bounding boxes, labels, and confidence tags on frame.
+        """
+        if frame is None or not detections:
+            return frame
+
+        vis = frame.copy()
+        class_colors = {
+            "PERSON": (80, 220, 100),       # Vibrant Green
+            "MAIN_BOX": (240, 180, 40),     # Azure / Sky Blue (BGR)
+            "RED_BOX": (40, 50, 235),       # Vibrant Red
+            "YELLOW_BOX": (20, 215, 255),   # Vibrant Yellow
+            "SAMPLE": (230, 80, 210),       # Magenta / Violet
+            "TOOL": (255, 140, 0),          # Cyan / Blue
+        }
+
+        for det in detections:
+            x, y, w, h = det.bbox
+            color = class_colors.get(det.class_name, (180, 190, 200))
+
+            # Bounding box with clean sharp aerospace lines
+            cv2.rectangle(vis, (x, y), (x + w, y + h), color, 2, cv2.LINE_AA)
+
+            # Centroid point
+            cx, cy = getattr(det, "centroid", (x + w // 2, y + h // 2))
+            cv2.circle(vis, (cx, cy), 3, color, -1, cv2.LINE_AA)
+
+            # Optional velocity motion indicator
+            vx, vy = getattr(det, "velocity", (0.0, 0.0))
+            if abs(vx) + abs(vy) > 15.0:
+                end_x = int(cx + np.clip(vx * 0.2, -40, 40))
+                end_y = int(cy + np.clip(vy * 0.2, -40, 40))
+                cv2.arrowedLine(vis, (cx, cy), (end_x, end_y), color, 1, cv2.LINE_AA, tipLength=0.3)
+
+            # Label text with Track ID and Confidence
+            conf_pct = int(det.confidence * 100)
+            track_prefix = f"#{det.track_id} " if getattr(det, "track_id", -1) > 0 else ""
+            source_tag = " [HYBRID]" if getattr(det, "source", "") == "chroma" else " [YOLO]"
+            label = f"{track_prefix}{det.class_name}{source_tag} {conf_pct}%"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+
+            # Header badge above box
+            badge_y1 = max(0, y - th - 6)
+            badge_y2 = y
+            badge_x2 = min(vis.shape[1], x + tw + 8)
+            cv2.rectangle(vis, (x, badge_y1), (badge_x2, badge_y2), color, -1)
+            cv2.putText(
+                vis,
+                label,
+                (x + 4, badge_y2 - 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.42,
+                (10, 15, 20),
+                1,
+                cv2.LINE_AA,
+            )
+
+        return vis
+

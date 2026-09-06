@@ -1,0 +1,16 @@
+{
+  "frame_id": "vid02_ref_bright_f00386",
+  "trial_id": "vid02_ref_bright",
+  "split": "train",
+  "source_video": "20260905_145858.mp4",
+  "source_frame": 386,
+  "status": "verified",
+  "verified_by": "lead_ml_engineer",
+  "dataset_version": "v3",
+  "warp_type": "none",
+  "photometric": {
+    "gain": 1.2,
+    "bias": 20
+  },
+  "objects_count": 6
+}

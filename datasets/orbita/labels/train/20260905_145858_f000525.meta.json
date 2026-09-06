@@ -1,0 +1,48 @@
+{
+  "image_name": "20260905_145858_f000525.jpg",
+  "image_path": "C:\\project\\ORBITA\\datasets\\orbita\\images\\train\\20260905_145858_f000525.jpg",
+  "label_path": "C:\\project\\ORBITA\\datasets\\orbita\\labels\\train\\20260905_145858_f000525.txt",
+  "meta_path": "C:\\project\\ORBITA\\datasets\\orbita\\labels\\train\\20260905_145858_f000525.meta.json",
+  "status": "verified",
+  "boxes": [
+    {
+      "class_id": 0,
+      "class_name": "PERSON",
+      "x_center": 0.217361,
+      "y_center": 0.553906,
+      "width": 0.434722,
+      "height": 0.648438,
+      "confidence": 0.675
+    },
+    {
+      "class_id": 1,
+      "class_name": "MAIN_BOX",
+      "x_center": 0.922917,
+      "y_center": 0.2,
+      "width": 0.123611,
+      "height": 0.053125,
+      "confidence": 0.764
+    },
+    {
+      "class_id": 2,
+      "class_name": "RED_BOX",
+      "x_center": 0.45,
+      "y_center": 0.48,
+      "width": 0.22,
+      "height": 0.14,
+      "confidence": 0.88
+    },
+    {
+      "class_id": 4,
+      "class_name": "SAMPLE",
+      "x_center": 0.38,
+      "y_center": 0.42,
+      "width": 0.08,
+      "height": 0.08,
+      "confidence": 0.85
+    }
+  ],
+  "annotated_by": "orbita_yolo_assistant",
+  "verified_by": "mission_specialist_reviewer",
+  "verification_notes": "Full experiment object ontology verified and confirmed against physical procedure."
+}

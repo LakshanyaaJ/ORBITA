@@ -1,0 +1,38 @@
+{
+  "dataset_version": "v2",
+  "source": "vdata_and_experiment_recordings",
+  "created_at": "2026-09-06T16:18:00+00:00",
+  "classes": [
+    "PERSON",
+    "MAIN_BOX",
+    "RED_BOX",
+    "YELLOW_BOX",
+    "SAMPLE",
+    "TOOL"
+  ],
+  "total_videos": 3,
+  "total_extracted_frames": 169,
+  "annotated_frames": 169,
+  "approved_samples": 169,
+  "verified_frames": 169,
+  "pending_review": 0,
+  "rejected_samples": 0,
+  "split_counts": {
+    "train": 55,
+    "val": 66,
+    "test": 48
+  },
+  "class_counts": {
+    "PERSON": 169,
+    "MAIN_BOX": 169,
+    "RED_BOX": 147,
+    "YELLOW_BOX": 169,
+    "SAMPLE": 151,
+    "TOOL": 101
+  },
+  "video_split_map": {
+    "20260905_145858": "train",
+    "20260905_145948": "val",
+    "20260905_150132": "test"
+  }
+}

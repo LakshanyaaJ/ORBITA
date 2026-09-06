@@ -85,8 +85,9 @@ def build_feature_vector(
         if hand is not None and hand.is_visible:
             fv[base]     = hand.position[0] / (fw + 1e-6)
             fv[base + 1] = hand.position[1] / (fh + 1e-6)
-            fv[base + 2] = np.clip(hand.velocity[0] / 20.0, -1.0, 1.0)
-            fv[base + 3] = np.clip(hand.velocity[1] / 20.0, -1.0, 1.0)
+            # Physical velocity normalized (assuming typical max 400 px/s)
+            fv[base + 2] = np.clip(hand.velocity[0] / 400.0, -1.0, 1.0)
+            fv[base + 3] = np.clip(hand.velocity[1] / 400.0, -1.0, 1.0)
 
     # --- [42:50] Interaction features per hand ---
     for i, side in enumerate(["left", "right"]):
@@ -95,9 +96,9 @@ def build_feature_vector(
         if hand_interactions:
             # Use highest-state interaction
             best = max(hand_interactions, key=lambda x: x.state)
-            fv[base]     = float(best.state) / 6.0             # Normalized state
+            fv[base]     = float(best.state) / 5.0             # Normalized state (0.0 to 1.0)
             fv[base + 1] = np.clip(best.distance_px / 200.0, 0.0, 1.0)
-            fv[base + 2] = np.clip(best.approach_velocity / 20.0, -1.0, 1.0)
+            fv[base + 2] = np.clip(best.approach_velocity / 300.0, -1.0, 1.0)
             fv[base + 3] = np.clip(best.duration_frames / 30.0, 0.0, 1.0)
 
     # --- [50:60] Object one-hot presence ---

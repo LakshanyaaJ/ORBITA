@@ -1,0 +1,57 @@
+{
+  "image_name": "20260905_150132_f000065.jpg",
+  "image_path": "C:\\project\\ORBITA\\datasets\\orbita\\images\\test\\20260905_150132_f000065.jpg",
+  "label_path": "C:\\project\\ORBITA\\datasets\\orbita\\labels\\test\\20260905_150132_f000065.txt",
+  "meta_path": "C:\\project\\ORBITA\\datasets\\orbita\\labels\\test\\20260905_150132_f000065.meta.json",
+  "status": "verified",
+  "boxes": [
+    {
+      "class_id": 0,
+      "class_name": "PERSON",
+      "x_center": 0.32817790927085966,
+      "y_center": 0.47069995314498353,
+      "width": 0.38,
+      "height": 0.44,
+      "confidence": 0.92
+    },
+    {
+      "class_id": 1,
+      "class_name": "MAIN_BOX",
+      "x_center": 0.82,
+      "y_center": 0.52,
+      "width": 0.28,
+      "height": 0.18,
+      "confidence": 0.94
+    },
+    {
+      "class_id": 3,
+      "class_name": "YELLOW_BOX",
+      "x_center": 0.74,
+      "y_center": 0.35,
+      "width": 0.26,
+      "height": 0.16,
+      "confidence": 0.9
+    },
+    {
+      "class_id": 4,
+      "class_name": "SAMPLE",
+      "x_center": 0.3377891501189228,
+      "y_center": 0.44786879145011604,
+      "width": 0.08,
+      "height": 0.09,
+      "confidence": 0.86
+    },
+    {
+      "class_id": 5,
+      "class_name": "TOOL",
+      "x_center": 0.42,
+      "y_center": 0.33927116370834387,
+      "width": 0.05,
+      "height": 0.14,
+      "confidence": 0.85
+    }
+  ],
+  "annotated_by": "orbita_dataset_v2_pipeline",
+  "verified_by": "lead_ml_engineer_reviewer",
+  "verification_notes": "Ground-truth physical verification gate approved for supervised V2 training."
+}

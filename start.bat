@@ -50,13 +50,13 @@ echo [*] Starting ORBITA Backend (FastAPI on Port 8000)...
 start "ORBITA - Backend" cmd /k "title ORBITA - Backend && cd /d "%ROOT_DIR%" && "%PYTHON_CMD%" main.py --mode web --scenario A"
 
 :: Brief delay to allow backend to initialize socket
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 >nul
 
 echo [*] Starting ORBITA Frontend (Vite on Port 5173)...
 start "ORBITA - Frontend" cmd /k "title ORBITA - Frontend && cd /d "%ROOT_DIR%frontend" && npm run dev"
 
 :: Brief delay for Vite to begin listening
-timeout /t 3 /nobreak >nul
+ping 127.0.0.1 -n 4 >nul
 
 echo.
 echo =====================================================================

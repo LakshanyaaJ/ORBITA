@@ -1,0 +1,16 @@
+{
+  "frame_id": "vid10_cool_light_f00157",
+  "trial_id": "vid10_cool_light",
+  "split": "val",
+  "source_video": "20260905_145948.mp4",
+  "source_frame": 157,
+  "status": "verified",
+  "verified_by": "lead_ml_engineer",
+  "dataset_version": "v3",
+  "warp_type": "cool_temp",
+  "photometric": {
+    "gain": 1.0,
+    "bias": 0
+  },
+  "objects_count": 6
+}

@@ -1,0 +1,16 @@
+{
+  "frame_id": "vid12_angled_side_f00505",
+  "trial_id": "vid12_angled_side",
+  "split": "val",
+  "source_video": "20260905_145948.mp4",
+  "source_frame": 505,
+  "status": "verified",
+  "verified_by": "lead_ml_engineer",
+  "dataset_version": "v3",
+  "warp_type": "tilt_lateral",
+  "photometric": {
+    "gain": 0.9,
+    "bias": -10
+  },
+  "objects_count": 6
+}

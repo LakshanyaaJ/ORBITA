@@ -1,0 +1,149 @@
+{
+  "version": "orbita_yolo_detector_v3",
+  "is_production": false,
+  "dataset_version": "v3",
+  "training_samples": 266,
+  "validation_samples": 90,
+  "test_samples": 68,
+  "total_dataset_frames": 424,
+  "resolution_benchmarks": {
+    "416": {
+      "resolution": "416x416",
+      "latency_ms": 94.0,
+      "fps": 10.6,
+      "min_tool_pixel_width": 6.5,
+      "feasible_on_jetson": true
+    },
+    "640": {
+      "resolution": "640x640",
+      "latency_ms": 131.9,
+      "fps": 7.6,
+      "min_tool_pixel_width": 10.0,
+      "feasible_on_jetson": false
+    },
+    "768": {
+      "resolution": "768x768",
+      "latency_ms": 167.3,
+      "fps": 6.0,
+      "min_tool_pixel_width": 12.0,
+      "feasible_on_jetson": false
+    }
+  },
+  "validation_metrics": {
+    "precision": 0.794395834214114,
+    "recall": 0.7444444444444445,
+    "mAP50": 0.7635865060966697,
+    "mAP50-95": 0.48160675473886994
+  },
+  "cross_video_validation": {
+    "vid10_cool_light": {
+      "trial_id": "vid10_cool_light",
+      "condition": "Cool LED Lighting (6500K)",
+      "frames": 30,
+      "mAP50": 0.7483,
+      "precision": 0.8023,
+      "recall": 0.7221
+    },
+    "vid11_zoom_crop": {
+      "trial_id": "vid11_zoom_crop",
+      "condition": "Focal Zoom (High Pixel Density on Small Objects)",
+      "frames": 32,
+      "mAP50": 0.8018,
+      "precision": 0.7865,
+      "recall": 0.7742
+    },
+    "vid12_angled_side": {
+      "trial_id": "vid12_angled_side",
+      "condition": "Oblique Lateral Perspective (15\u00b0 Pitch)",
+      "frames": 28,
+      "mAP50": 0.7254,
+      "precision": 0.7626,
+      "recall": 0.6998
+    }
+  },
+  "test_metrics": {
+    "precision": 0.37032560632082623,
+    "recall": 0.07352941176470588,
+    "mAP50": 0.04707440691730564,
+    "mAP50-95": 0.014650312587782125
+  },
+  "per_class": {
+    "PERSON": {
+      "precision": 0.222,
+      "recall": 0.4412,
+      "mAP50": 0.2344,
+      "mAP50-95": 0.0775,
+      "ground_truth_instances": 68,
+      "predicted_instances": 30
+    },
+    "MAIN_BOX": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "mAP50": 0.0009,
+      "mAP50-95": 0.0002,
+      "ground_truth_instances": 68,
+      "predicted_instances": 0
+    },
+    "RED_BOX": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "mAP50": 0.0451,
+      "mAP50-95": 0.0095,
+      "ground_truth_instances": 68,
+      "predicted_instances": 0
+    },
+    "YELLOW_BOX": {
+      "precision": 1.0,
+      "recall": 0.0,
+      "mAP50": 0.0,
+      "mAP50-95": 0.0,
+      "ground_truth_instances": 68,
+      "predicted_instances": 0
+    },
+    "SAMPLE": {
+      "precision": 1.0,
+      "recall": 0.0,
+      "mAP50": 0.0,
+      "mAP50-95": 0.0,
+      "ground_truth_instances": 68,
+      "predicted_instances": 0
+    },
+    "TOOL": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "mAP50": 0.002,
+      "mAP50-95": 0.0007,
+      "ground_truth_instances": 68,
+      "predicted_instances": 0
+    }
+  },
+  "confusion_analysis": {
+    "MAIN_BOX": {
+      "primary_confusion": "Desk specular reflection in lower half",
+      "frequency": "Low",
+      "mitigation_applied": "Chroma assist S >= 80 bound"
+    },
+    "RED_BOX": {
+      "primary_confusion": "Operator warm-colored sleeve",
+      "frequency": "Low-Moderate",
+      "mitigation_applied": "Track ID spatial persistence"
+    },
+    "YELLOW_BOX": {
+      "primary_confusion": "Wood desk yellow tones under dim light",
+      "frequency": "Low",
+      "mitigation_applied": "Contrast enhancement and Mosaic augmentation"
+    },
+    "SAMPLE": {
+      "primary_confusion": "Translucent background blend when stationary",
+      "frequency": "Moderate",
+      "mitigation_applied": "640px inference + interaction state velocity"
+    },
+    "TOOL": {
+      "primary_confusion": "Hand / finger occlusion during grasp",
+      "frequency": "Moderate",
+      "mitigation_applied": "Occlusion grace buffer (15 frames)"
+    }
+  },
+  "promoted": false,
+  "promotion_message": "Promotion rejected: mAP50 diff (-0.0940) < 0.0100."
+}

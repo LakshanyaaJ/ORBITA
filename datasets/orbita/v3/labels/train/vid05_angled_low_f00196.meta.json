@@ -1,0 +1,16 @@
+{
+  "frame_id": "vid05_angled_low_f00196",
+  "trial_id": "vid05_angled_low",
+  "split": "train",
+  "source_video": "20260905_145948.mp4",
+  "source_frame": 196,
+  "status": "verified",
+  "verified_by": "lead_ml_engineer",
+  "dataset_version": "v3",
+  "warp_type": "tilt_down",
+  "photometric": {
+    "gain": 1.05,
+    "bias": 5
+  },
+  "objects_count": 6
+}

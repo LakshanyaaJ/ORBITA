@@ -1,0 +1,16 @@
+{
+  "frame_id": "vid06_high_mount_f00255",
+  "trial_id": "vid06_high_mount",
+  "split": "train",
+  "source_video": "20260905_145948.mp4",
+  "source_frame": 255,
+  "status": "verified",
+  "verified_by": "lead_ml_engineer",
+  "dataset_version": "v3",
+  "warp_type": "high_zoom_out",
+  "photometric": {
+    "gain": 0.95,
+    "bias": -5
+  },
+  "objects_count": 6
+}

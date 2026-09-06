@@ -1,0 +1,16 @@
+{
+  "frame_id": "vid09_warm_light_f00210",
+  "trial_id": "vid09_warm_light",
+  "split": "train",
+  "source_video": "20260905_145948.mp4",
+  "source_frame": 210,
+  "status": "verified",
+  "verified_by": "lead_ml_engineer",
+  "dataset_version": "v3",
+  "warp_type": "warm_temp",
+  "photometric": {
+    "gain": 1.0,
+    "bias": 0
+  },
+  "objects_count": 6
+}

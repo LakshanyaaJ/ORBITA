@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
-import { Activity, Cpu, Settings, ArrowLeft, Radio } from 'lucide-react';
+import { Activity, Cpu, Settings, ArrowLeft, Radio, Film } from 'lucide-react';
 import clsx from 'clsx';
 
 import GoogleAppsButton from './GoogleAppsButton';
@@ -51,6 +51,12 @@ export default function PageShell() {
                 onClick={() => navigate('/system')}
                 icon={<Cpu size={16} strokeWidth={2} />}
                 label="SYSTEM"
+              />
+              <NavButton 
+                active={location.pathname === '/vdata' || location.pathname === '/dataset'} 
+                onClick={() => navigate('/vdata')}
+                icon={<Film size={16} strokeWidth={2} />}
+                label="VDATA / DATASET"
               />
               <NavButton 
                 active={location.pathname === '/mission-control'} 

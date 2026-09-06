@@ -1,0 +1,16 @@
+{
+  "frame_id": "vid04_angled_top_f00334",
+  "trial_id": "vid04_angled_top",
+  "split": "train",
+  "source_video": "20260905_145948.mp4",
+  "source_frame": 334,
+  "status": "verified",
+  "verified_by": "lead_ml_engineer",
+  "dataset_version": "v3",
+  "warp_type": "tilt_up",
+  "photometric": {
+    "gain": 1.0,
+    "bias": 0
+  },
+  "objects_count": 6
+}

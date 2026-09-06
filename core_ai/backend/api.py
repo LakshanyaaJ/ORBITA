@@ -60,6 +60,17 @@ from core_ai.video.recorder import VideoRecorder
 from core_ai.video.streamer import MJPEGStreamer
 from core_ai.voice.tts import TTSEngine
 
+from core_ai.dataset.video_ingest import VideoIngestPipeline
+from core_ai.dataset.frame_extractor import FrameExtractor, ExtractionConfig
+from core_ai.dataset.dataset_manager import DatasetManager
+from core_ai.dataset.annotator import AssistedAnnotator
+from core_ai.dataset.review_queue import ReviewQueue
+from core_ai.recording.quality_filter import DatasetQualityFilter
+from core_ai.recording.run_collector import RunCollector
+from core_ai.training.model_registry import ModelRegistry
+from core_ai.training.train_yolo import train_yolo_model, check_dataset_readiness
+from core_ai.training.train_har import train_temporal_har
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +87,7 @@ class AnnotationCache:
         self.poses: List[Any] = []
         self.left_hand: Optional[Any] = None
         self.right_hand: Optional[Any] = None
+        self.interactions: List[Any] = []
         self.camera_name: str = ""
         self.ai_latency_ms: float = 0.0
         self.timestamp: float = 0.0
@@ -87,6 +99,7 @@ class AnnotationCache:
         poses: List[Any],
         left_hand: Optional[Any],
         right_hand: Optional[Any],
+        interactions: List[Any],
         camera_name: str,
         ai_latency_ms: float,
     ) -> None:
@@ -96,11 +109,12 @@ class AnnotationCache:
             self.poses = list(poses) if poses else []
             self.left_hand = left_hand
             self.right_hand = right_hand
+            self.interactions = list(interactions) if interactions else []
             self.camera_name = camera_name
             self.ai_latency_ms = ai_latency_ms
             self.timestamp = time.time()
 
-    def get_snapshot(self) -> Tuple[Optional[ValidationResult], List[Any], List[Any], Optional[Any], Optional[Any], str, float]:
+    def get_snapshot(self) -> Tuple[Optional[ValidationResult], List[Any], List[Any], Optional[Any], Optional[Any], List[Any], str, float]:
         with self.lock:
             return (
                 self.result,
@@ -108,6 +122,7 @@ class AnnotationCache:
                 self.poses,
                 self.left_hand,
                 self.right_hand,
+                self.interactions,
                 self.camera_name,
                 self.ai_latency_ms,
             )
@@ -134,6 +149,13 @@ class AppState:
         self.state_manager: Optional[StateManager] = None
         self.experiment_logger: Optional[ExperimentLogger] = None
         self.simulator: Optional[ExperimentSimulator] = None
+
+        # Closed-loop dataset, candidate recording, and model registry
+        self.dataset_manager = DatasetManager()
+        self.review_queue = ReviewQueue()
+        self.run_collector = RunCollector()
+        self.model_registry = ModelRegistry()
+        self.annotator: Optional[AssistedAnnotator] = None
 
         # Threading and background loops
         self.is_running: bool = False
@@ -163,6 +185,42 @@ class AppState:
         self._camera_legacy = cam
         if self.camera_manager and cam:
             self.camera_manager._jetson_camera = cam
+
+    def reload_production_models(self) -> dict[str, Any]:
+        """Dynamically reload promoted production models into live inference engines."""
+        reloaded = {}
+        if self.model_registry:
+            prod_det = self.model_registry.get_production_model("yolo_detector")
+            if prod_det and self.detector:
+                ok = self.detector.load_model(prod_det.weights_path)
+                reloaded["yolo_detector"] = {
+                    "version": prod_det.version,
+                    "success": ok,
+                    "path": prod_det.weights_path,
+                }
+            elif self.detector:
+                reloaded["yolo_detector"] = {
+                    "version": "baseline",
+                    "success": True,
+                    "path": self.detector.active_model_path,
+                }
+
+            prod_har = self.model_registry.get_production_model("har_gru")
+            if prod_har and self.classifier:
+                ok = self.classifier.load_checkpoint(prod_har.weights_path)
+                reloaded["har_gru"] = {
+                    "version": prod_har.version,
+                    "success": ok,
+                    "path": prod_har.weights_path,
+                }
+            elif self.classifier:
+                reloaded["har_gru"] = {
+                    "version": "heuristic_fallback",
+                    "success": True,
+                    "path": self.classifier.active_checkpoint_path,
+                }
+        logger.info("Production models reloaded for live inference: %s", reloaded)
+        return reloaded
 
 
 _state = AppState()
@@ -195,6 +253,9 @@ async def _startup() -> None:
     _state.feature_window = TemporalFeatureWindow(cfg.har.window_frames)
     _state.classifier = ActionClassifier(cfg.har)
     _state.recorder = VideoRecorder(cfg.video)
+    _state.annotator = AssistedAnnotator(detector=_state.detector)
+    # Ensure live inference starts with the currently promoted production models
+    _state.reload_production_models()
 
     # Set streamer JPEG quality from config
     stream_q = getattr(cfg.camera, "jpeg_quality", 70)
@@ -337,21 +398,22 @@ def _execute_ai_cycle() -> None:
             target_object=obj,
         )
 
-    elif _state.camera_manager and active_source in ("jetson_camera", "ip_camera"):
+    elif _state.camera_manager and active_source in ("jetson_camera", "ip_camera", "phone_webcam"):
         frame_buf = _state.camera_manager.get_frame_buffer()
         frame, cap_ts, _ = frame_buf.get_latest()
         if frame is None:
             return
 
         latency_ms = max(0.0, (time.time() - cap_ts) * 1000.0)
-        cam_name = "Phone IP Camera" if active_source == "ip_camera" else "Jetson Camera"
+        cam_name = "Phone Camera" if active_source in ("ip_camera", "phone_webcam") else "Jetson Camera"
         t_stamp = time.time()
 
-        # Perception
-        objects = _state.detector.detect(frame, t_stamp) if _state.detector else []
+        # Perception: run pose & hand tracking first so detector has hand context
         poses = _state.pose.estimate(frame, t_stamp) if _state.pose else []
         pose = poses[0] if poses else None
-        left, right = _state.hand_tracker.track(pose, frame, t_stamp) if _state.hand_tracker else (None, None)
+        person_bbox = pose.bbox if pose else None
+        left, right = _state.hand_tracker.track(pose, frame, t_stamp, person_bbox=person_bbox) if _state.hand_tracker else (None, None)
+        objects = _state.detector.detect(frame, t_stamp, hands=(left, right)) if _state.detector else []
         interactions = _state.interaction_tracker.update(left, right, objects, t_stamp) if _state.interaction_tracker else []
 
         # Feature fusion & HAR
@@ -373,22 +435,37 @@ def _execute_ai_cycle() -> None:
     # Reasoning / State Manager
     result = None
     if _state.state_manager:
-        if active_source != "sim":
-            detected_obj = _state.state_manager._resolve_object(prediction, objects)
-        else:
-            detected_obj = obj
-
         ai_calc_time = (time.time() - t0) * 1000.0
         result = _state.state_manager.process(
-            prediction,
-            objects,
+            prediction=prediction,
+            detected_objects=objects,
             fps=_state.ai_fps,
             latency_ms=ai_calc_time + latency_ms,
+            left_hand=left,
+            right_hand=right,
+            interactions=interactions if active_source != "sim" else [],
         )
         _state.last_result = result
 
         if _state.experiment_logger:
             _state.experiment_logger.log(result)
+
+        # Closed-loop candidate recording
+        if _state.run_collector and _state.run_collector.is_active:
+            _state.run_collector.record_frame(
+                frame=frame,
+                fsm_step_idx=result.fsm_state.current_step_idx,
+                fsm_status=result.fsm_state.status.name,
+                detected_action=prediction.action,
+                action_confidence=prediction.confidence,
+                detected_objects=objects,
+            )
+            if result.fsm_state.status.name == "COMPLETED":
+                _state.run_collector.finalize_run(
+                    was_successful=True,
+                    total_steps=result.fsm_state.total_steps,
+                    completed_steps=len(result.fsm_state.completed_step_ids),
+                )
 
     ai_duration_ms = (time.time() - t0) * 1000.0
 
@@ -399,6 +476,7 @@ def _execute_ai_cycle() -> None:
         poses=poses,
         left_hand=left,
         right_hand=right,
+        interactions=interactions if active_source != "sim" else [],
         camera_name=cam_name,
         ai_latency_ms=ai_duration_ms,
     )
@@ -462,6 +540,7 @@ async def _stream_single_frame() -> None:
         poses,
         left,
         right,
+        interactions,
         cam_name,
         ai_latency_ms,
     ) = _state.annotation_cache.get_snapshot()
@@ -474,7 +553,8 @@ async def _stream_single_frame() -> None:
         poses=poses,
         left_hand=left,
         right_hand=right,
-        camera_name=cam_name or ("Phone IP Camera" if active_source == "ip_camera" else "Live Camera"),
+        interactions=interactions,
+        camera_name=cam_name or ("Phone Camera" if active_source in ("ip_camera", "phone_webcam") else "Live Camera"),
         latency_ms=cam_latency_ms,
     )
 
@@ -507,6 +587,7 @@ def _annotate_frame(
     poses: Optional[list] = None,
     left_hand: Optional[Any] = None,
     right_hand: Optional[Any] = None,
+    interactions: Optional[list] = None,
     camera_name: str = "",
     latency_ms: float = 0.0,
 ) -> np.ndarray:
@@ -527,12 +608,46 @@ def _annotate_frame(
         except Exception:
             pass
 
-    # 3. Hand tracking points
+    # 3. Hand tracking skeletons & persistent IDs
     if (left_hand or right_hand) and _state.hand_tracker:
         try:
             vis = _state.hand_tracker.draw(vis, left_hand, right_hand)
         except Exception:
             pass
+
+    # 3b. Hand-object interactions (holding, contact, release)
+    if interactions and _state.interaction_tracker and objects and (left_hand or right_hand):
+        try:
+            vis = _state.interaction_tracker.draw_interactions(vis, interactions, objects, left_hand, right_hand)
+        except Exception:
+            pass
+
+    # 4. Hand System Engineering Telemetry Card (Top Right)
+    if (left_hand and left_hand.is_visible) or (right_hand and right_hand.is_visible):
+        ew, eh = 270, 95
+        ex = max(10, vis.shape[1] - ew - 10)
+        ey = 38
+        cv2.rectangle(vis, (ex, ey), (ex + ew, ey + eh), (12, 16, 26), -1)
+        cv2.rectangle(vis, (ex, ey), (ex + ew, ey + eh), (0, 200, 255), 1)
+
+        lh_stat = f"L-Hand #{left_hand.hand_id if left_hand else 1}: {int(left_hand.confidence*100) if (left_hand and left_hand.is_visible) else 0}% ({left_hand.track_status if left_hand else 'LOST'})"
+        rh_stat = f"R-Hand #{right_hand.hand_id if right_hand else 2}: {int(right_hand.confidence*100) if (right_hand and right_hand.is_visible) else 0}% ({right_hand.track_status if right_hand else 'LOST'})"
+
+        primary_int = None
+        if interactions:
+            cand = sorted(interactions, key=lambda x: (getattr(x, "state", 0), getattr(x, "confidence", 0)), reverse=True)
+            if cand:
+                primary_int = cand[0]
+
+        int_line = f"Interaction: {primary_int.hand_side[0].upper()} -> {primary_int.object_class} ({primary_int.state.name})" if primary_int else "Interaction: None"
+        spd_val = max(left_hand.speed if (left_hand and left_hand.is_visible) else 0.0, right_hand.speed if (right_hand and right_hand.is_visible) else 0.0)
+        bot_line = f"Speed: {int(spd_val)} px/s | Landmarks: 21/21"
+
+        cv2.putText(vis, "HAND TELEMETRY", (ex + 8, ey + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 220, 255), 1, cv2.LINE_AA)
+        cv2.putText(vis, lh_stat, (ex + 8, ey + 33), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (220, 220, 220), 1, cv2.LINE_AA)
+        cv2.putText(vis, rh_stat, (ex + 8, ey + 49), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (220, 220, 220), 1, cv2.LINE_AA)
+        cv2.putText(vis, int_line, (ex + 8, ey + 67), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (0, 255, 120), 1, cv2.LINE_AA)
+        cv2.putText(vis, bot_line, (ex + 8, ey + 84), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (170, 170, 170), 1, cv2.LINE_AA)
 
     # 4. Status banner
     status_colors = {
@@ -753,6 +868,17 @@ async def control(body: dict):
             path = _state.recorder.stop()
             return {"status": "stopped", "path": path}
 
+    if action == "start_candidate_recording":
+        if _state.run_collector and _state.state_manager:
+            run_id = _state.run_collector.start_run(_state.state_manager.experiment_id)
+            return {"status": "candidate_recording_started", "run_id": run_id}
+
+    if action == "stop_candidate_recording":
+        if _state.run_collector and _state.run_collector.is_active:
+            res = _state.run_collector.finalize_run(was_successful=True)
+            return {"status": "candidate_recording_stopped", "candidate": res}
+        return {"status": "not_recording"}
+
     if action == "export_log":
         if _state.experiment_logger:
             paths = _state.experiment_logger.export()
@@ -935,6 +1061,568 @@ async def api_experiments():
     from core_ai.database.sqlite_db import OrbitaDB
     db = OrbitaDB()
     return db.list_experiments()
+
+
+# =========================================================================== #
+# Dataset & Closed-Loop Learning Endpoints
+# =========================================================================== #
+@app.get("/api/dataset/status")
+async def api_dataset_status():
+    """Returns dataset manifest, ingestion report, counts, active models, and honest stage."""
+    manifest = _state.dataset_manager.get_manifest() if _state.dataset_manager else None
+    ingest_report_path = Path("datasets/orbita/metadata/ingestion_report.json")
+    ingest_report = None
+    if ingest_report_path.exists():
+        try:
+            with open(ingest_report_path, "r", encoding="utf-8") as f:
+                ingest_report = json.load(f)
+        except Exception:
+            pass
+
+    prod_detector = _state.model_registry.get_production_model("yolo_detector") if _state.model_registry else None
+    prod_har = _state.model_registry.get_production_model("har_gru") if _state.model_registry else None
+
+    # Count verified labels from sidecars
+    verified_count = 0
+    if _state.dataset_manager and _state.dataset_manager.labels_dir.exists():
+        for meta_p in _state.dataset_manager.labels_dir.rglob("*.meta.json"):
+            try:
+                with open(meta_p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if d.get("status") == "verified":
+                    verified_count += 1
+            except Exception:
+                pass
+
+    active_det = _state.detector.active_model_path if _state.detector else "models/yolov8n.pt"
+    active_har = _state.classifier.active_checkpoint_path if _state.classifier else ""
+
+    # Honest workflow stage evaluation
+    stage = "NO_VIDEOS"
+    if ingest_report and ingest_report.get("total_videos", 0) > 0:
+        stage = "VIDEOS_FOUND"
+    if manifest and manifest.total_extracted_frames > 0:
+        stage = "FRAMES_EXTRACTED"
+    if manifest and manifest.annotated_frames > 0:
+        stage = "ANNOTATIONS_GENERATED"
+    if verified_count > 0:
+        stage = "ANNOTATIONS_VERIFIED"
+    if verified_count >= 5 and manifest and manifest.split_counts.get("train", 0) > 0:
+        stage = "DATASET_READY"
+    if prod_detector or prod_har:
+        stage = "MODEL_TRAINED"
+    if (prod_detector and prod_detector.metrics) or (prod_har and prod_har.metrics):
+        stage = "MODEL_VALIDATED"
+    if (prod_detector and prod_detector.is_production) or (prod_har and prod_har.is_production):
+        stage = "MODEL_PROMOTED"
+    if ((prod_detector and prod_detector.weights_path == active_det) or
+        (prod_har and prod_har.weights_path == active_har)):
+        stage = "MODEL_LOADED_INFERENCE"
+
+    return {
+        "stage": stage,
+        "manifest": manifest.to_dict() if manifest else None,
+        "ingestion_report": ingest_report,
+        "verified_annotations_count": verified_count,
+        "production_models": {
+            "yolo_detector": prod_detector.to_dict() if prod_detector else None,
+            "har_gru": prod_har.to_dict() if prod_har else None,
+        },
+        "live_inference_models": {
+            "yolo_detector": {
+                "active_path": active_det,
+                "is_promoted_loaded": (prod_detector.weights_path == active_det) if prod_detector else False,
+            },
+            "har_gru": {
+                "active_path": active_har,
+                "is_promoted_loaded": (prod_har.weights_path == active_har) if prod_har else False,
+            },
+        },
+        "review_queue_counts": {
+            "pending": len(_state.review_queue.list_candidates(status_filter="pending")),
+            "approved": len(_state.review_queue.list_candidates(status_filter="approved")),
+            "rejected": len(_state.review_queue.list_candidates(status_filter="rejected")),
+        },
+    }
+
+
+@app.post("/api/experiment/start")
+async def api_experiment_start(body: dict):
+    """Explicit experiment start mechanism: resets FSM and arms automatic run recording."""
+    experiment_id = body.get("experiment_id", "EXP001")
+    scenario_id = body.get("scenario", "A").upper()
+
+    if _state.state_manager:
+        _state.state_manager.reset()
+        _state.state_manager.experiment_id = experiment_id
+        if hasattr(_state.state_manager, "fsm"):
+            _state.state_manager.fsm.experiment_id = experiment_id
+
+    if _state.simulator:
+        try:
+            scenario = Scenario(scenario_id)
+            _state.simulator.reset(scenario)
+        except Exception:
+            pass
+
+    run_id = ""
+    if _state.run_collector:
+        run_id = _state.run_collector.start_run(experiment_id)
+
+    logger.info("Experiment %s started (Scenario: %s, Candidate run: %s)", experiment_id, scenario_id, run_id)
+    return {
+        "status": "experiment_started",
+        "experiment_id": experiment_id,
+        "run_id": run_id,
+        "recording": True,
+    }
+
+
+@app.post("/api/experiment/stop")
+async def api_experiment_stop():
+    """Stops active experiment and finalizes candidate run recording."""
+    candidate_summary = None
+    if _state.run_collector and _state.run_collector.is_active:
+        candidate_summary = _state.run_collector.finalize_run(was_successful=True)
+
+    return {
+        "status": "experiment_stopped",
+        "candidate": candidate_summary,
+    }
+
+
+@app.post("/api/dataset/verify_annotation")
+async def api_dataset_verify_annotation(body: dict):
+    """Marks a single annotation as verified by human reviewer."""
+    meta_path = body.get("meta_path", "")
+    reviewer = body.get("verified_by", "human_reviewer")
+    notes = body.get("notes", None)
+    updated_boxes = body.get("updated_boxes", None)
+
+    if not meta_path or not Path(meta_path).exists():
+        return JSONResponse(status_code=404, content={"status": "error", "message": f"meta_path '{meta_path}' not found."})
+
+    if not _state.annotator:
+        _state.annotator = AssistedAnnotator(detector=_state.detector)
+
+    record = _state.annotator.verify_annotation(
+        meta_path=meta_path,
+        verified_by=reviewer,
+        notes=notes,
+        updated_boxes=updated_boxes,
+    )
+    return {"status": "verified", "record": record.to_dict()}
+
+
+@app.post("/api/dataset/verify_batch")
+async def api_dataset_verify_batch(body: dict = None):
+    """Batch marks pre-annotated frames as verified for training approval."""
+    body = body or {}
+    split = body.get("split", "train")
+    reviewer = body.get("verified_by", "mission_specialist")
+
+    if not _state.annotator:
+        _state.annotator = AssistedAnnotator(detector=_state.detector)
+
+    verified_count = 0
+    split_lbl_dir = _state.dataset_manager.labels_dir / split
+    if split_lbl_dir.exists():
+        for meta_p in split_lbl_dir.glob("*.meta.json"):
+            _state.annotator.verify_annotation(meta_p, verified_by=reviewer, notes="Batch verified via UI/API")
+            verified_count += 1
+
+    return {"status": "batch_verified", "split": split, "count": verified_count}
+
+
+@app.post("/api/dataset/ingest")
+async def api_dataset_ingest(body: dict = None):
+    """Scan vdata/, extract quality-filtered frames, and assign video splits."""
+    body = body or {}
+    vdata_dir = body.get("vdata_dir", "vdata")
+    sample_fps = float(body.get("sample_fps", 2.0))
+    blur_threshold = float(body.get("blur_threshold", 40.0))
+
+    pipeline = VideoIngestPipeline(vdata_dir=vdata_dir)
+    report = pipeline.scan_and_report("datasets/orbita/metadata/ingestion_report.json")
+
+    _state.dataset_manager.initialize_directories()
+    videos = sorted(list(Path(vdata_dir).glob("*.mp4")))
+    video_ids = [v.stem for v in videos]
+    split_map = _state.dataset_manager.assign_video_splits(video_ids)
+
+    extractor = FrameExtractor(ExtractionConfig(
+        sample_fps=sample_fps,
+        blur_threshold=blur_threshold,
+        duplicate_threshold=0.95,
+        max_dimension=1280,
+    ))
+
+    extracted_counts = {}
+    for vpath in videos:
+        vid = vpath.stem
+        split = split_map.get(vid, "train")
+        out_dir = _state.dataset_manager.images_dir / split
+        frames = extractor.extract_from_video(vpath, out_dir, filename_prefix=vid)
+        kept = [f for f in frames if f.is_kept]
+        extracted_counts[vid] = len(kept)
+
+    manifest = _state.dataset_manager.update_manifest(
+        total_videos=len(videos),
+        video_split_map=split_map,
+    )
+
+    return {
+        "status": "ingestion_complete",
+        "ingestion_report": report.to_dict(),
+        "extracted_counts": extracted_counts,
+        "manifest": manifest.to_dict(),
+    }
+
+
+@app.post("/api/dataset/pre_annotate")
+async def api_dataset_pre_annotate():
+    """Run assisted pre-labeling on all unannotated frames using existing detector."""
+    if not _state.annotator:
+        _state.annotator = AssistedAnnotator(detector=_state.detector)
+
+    total_annotated = 0
+    total_boxes = 0
+    for split in ["train", "val", "test"]:
+        img_dir = _state.dataset_manager.images_dir / split
+        lbl_dir = _state.dataset_manager.labels_dir / split
+        if not img_dir.exists():
+            continue
+        imgs = sorted(list(img_dir.glob("*.jpg")))
+        for img_p in imgs:
+            lbl_p = lbl_dir / f"{img_p.stem}.txt"
+            record = _state.annotator.pre_annotate_image(img_p, lbl_p, min_confidence=0.20)
+            total_annotated += 1
+            total_boxes += len(record.boxes)
+
+    manifest = _state.dataset_manager.update_manifest(
+        total_videos=len(_state.dataset_manager.get_manifest().video_split_map if _state.dataset_manager.get_manifest() else {}),
+        video_split_map=_state.dataset_manager.get_manifest().video_split_map if _state.dataset_manager.get_manifest() else {},
+    )
+
+    return {
+        "status": "pre_annotation_complete",
+        "frames_annotated": total_annotated,
+        "boxes_generated": total_boxes,
+        "manifest": manifest.to_dict(),
+    }
+
+
+@app.get("/api/dataset/candidates")
+async def api_dataset_candidates(status: Optional[str] = None):
+    """List candidate runs in the human review queue."""
+    candidates = _state.review_queue.list_candidates(status_filter=status)
+    return [c.to_dict() for c in candidates]
+
+
+@app.get("/api/dataset/candidates/{run_id}")
+async def api_dataset_candidate_detail(run_id: str):
+    """Get full metadata, quality metrics, and frame filenames for a candidate run."""
+    details = _state.review_queue.get_candidate_details(run_id)
+    if not details:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Candidate run not found."})
+    return details
+
+
+@app.post("/api/dataset/candidates/{run_id}/review")
+async def api_dataset_candidate_review(run_id: str, body: dict):
+    """Human-in-the-loop review action: approve or reject candidate run."""
+    action = body.get("action", "approve").lower()
+    reviewer = body.get("reviewer", "human_operator")
+    notes = body.get("notes", "")
+
+    if action == "approve":
+        target_split = body.get("target_split", "train")
+        try:
+            res = _state.review_queue.approve_candidate(
+                run_id=run_id,
+                reviewer_name=reviewer,
+                target_split=target_split,
+                notes=notes,
+            )
+            return res
+        except FileNotFoundError as e:
+            return JSONResponse(status_code=404, content={"status": "error", "message": str(e)})
+
+    elif action == "reject":
+        reason = body.get("reason", "Operator rejected candidate run.")
+        try:
+            res = _state.review_queue.reject_candidate(
+                run_id=run_id,
+                reviewer_name=reviewer,
+                reason=reason,
+            )
+            return res
+        except FileNotFoundError as e:
+            return JSONResponse(status_code=404, content={"status": "error", "message": str(e)})
+
+    return JSONResponse(status_code=400, content={"status": "error", "message": f"Invalid review action '{action}'"})
+
+
+@app.post("/api/training/retrain")
+async def api_training_retrain(body: dict = None):
+    """
+    Controlled retraining endpoint.
+    Safely blocks training if annotations are missing or unverified unless explicitly overridden.
+    """
+    body = body or {}
+    model_type = body.get("model_type", "har").lower()
+    epochs = int(body.get("epochs", 5))
+    require_verified = bool(body.get("require_verified", True))
+
+    if model_type == "yolo":
+        res = train_yolo_model(
+            data_yaml="datasets/orbita/data.yaml",
+            epochs=epochs,
+            device="cpu",
+        )
+        return res
+
+    elif model_type == "har":
+        res = train_temporal_har(epochs=epochs)
+        return res
+
+    elif model_type == "all":
+        yolo_res = train_yolo_model(data_yaml="datasets/orbita/data.yaml", epochs=epochs, device="cpu")
+        har_res = train_temporal_har(epochs=epochs)
+        return {"yolo": yolo_res, "har": har_res}
+
+    return JSONResponse(status_code=400, content={"status": "error", "message": f"Unknown model type '{model_type}'"})
+
+
+@app.get("/api/models/versions")
+async def api_models_versions():
+    """List all versioned models, metrics, and active production status."""
+    if _state.model_registry:
+        models = _state.model_registry.list_models()
+        return [m.to_dict() for m in models]
+    return []
+
+
+@app.post("/api/models/promote")
+async def api_models_promote(body: dict):
+    """Evaluate and promote a candidate model to production, hot-reloading live inference."""
+    version = body.get("version", "")
+    if not _state.model_registry:
+        return JSONResponse(status_code=500, content={"status": "error", "message": "ModelRegistry not initialized."})
+
+    promoted, msg = _state.model_registry.evaluate_and_promote(version, min_improvement=0.0)
+    reloaded = {}
+    if promoted:
+        reloaded = _state.reload_production_models()
+    return {"version": version, "promoted": promoted, "message": msg, "reloaded": reloaded}
+
+
+# =========================================================================== #
+# Reference Video (vdata) YOLO Inspection Endpoints
+# =========================================================================== #
+@app.get("/api/vdata/videos")
+async def api_vdata_videos():
+    """List all available reference videos in vdata/ with probed metadata."""
+    vdata_dir = Path("vdata")
+    if not vdata_dir.exists():
+        return []
+
+    videos = []
+    for ext in (".mp4", ".mov", ".avi", ".mkv"):
+        for p in sorted(vdata_dir.glob(f"*{ext}")):
+            cap = cv2.VideoCapture(str(p))
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 0
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 0
+            duration = round(total_frames / fps, 1) if fps > 0 else 0.0
+            cap.release()
+
+            size_mb = round(p.stat().st_size / (1024 * 1024), 1)
+            videos.append({
+                "filename": p.name,
+                "path": str(p),
+                "duration_seconds": duration,
+                "total_frames": total_frames,
+                "fps": round(fps, 1),
+                "width": w,
+                "height": h,
+                "resolution": f"{w}x{h}",
+                "size_mb": size_mb,
+            })
+    return videos
+
+
+@app.get("/api/vdata/stream/{filename}")
+async def api_vdata_stream(filename: str):
+    """
+    Streams a reference video from vdata/ with real-time YOLO object detection bounding boxes overlaid.
+    Loops continuously so user can observe how YOLO detects objects throughout the trial.
+    """
+    video_path = Path("vdata") / filename
+    if not video_path.exists():
+        return JSONResponse(status_code=404, content={"status": "error", "message": f"Video '{filename}' not found."})
+
+    async def generate():
+        while True:
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                break
+
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            frame_delay = 1.0 / max(10.0, min(fps, 30.0))
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # Resize for responsive real-time inference if 4K or very large
+                h, w = frame.shape[:2]
+                target_w = 960
+                if w > target_w:
+                    target_h = int(h * (target_w / w))
+                    frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+                t_start = time.time()
+                detections = []
+                poses = []
+                left, right = None, None
+                interactions = []
+                try:
+                    if _state.pose:
+                        poses = _state.pose.estimate(frame, t_start)
+                    pose = poses[0] if poses else None
+                    person_bbox = pose.bbox if pose else None
+                    if _state.hand_tracker:
+                        left, right = _state.hand_tracker.track(pose, frame, t_start, person_bbox=person_bbox)
+                    if _state.detector:
+                        detections = _state.detector.detect(frame, timestamp=t_start, hands=(left, right))
+                    if _state.interaction_tracker:
+                        interactions = _state.interaction_tracker.update(left, right, detections, t_start)
+                    frame = _annotate_frame(
+                        frame=frame,
+                        result=None,
+                        objects=detections,
+                        poses=poses,
+                        left_hand=left,
+                        right_hand=right,
+                        interactions=interactions,
+                        camera_name=f"VData: {filename}",
+                        latency_ms=(time.time() - t_start) * 1000.0,
+                    )
+                except Exception as e:
+                    logger.warning("Error running perception on frame: %s", e)
+                t_infer = (time.time() - t_start) * 1000.0
+
+                # Header HUD overlay
+                cv2.rectangle(frame, (0, 0), (frame.shape[1], 36), (12, 17, 24), -1)
+                hud_text = f"YOLO INSPECT: {filename} | {len(detections)} OBJECTS DETECTED | {t_infer:.0f}ms"
+                cv2.putText(frame, hud_text, (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (60, 220, 120), 1, cv2.LINE_AA)
+
+                model_name = Path(_state.detector.active_model_path).name if _state.detector else "yolov8n.pt"
+                cv2.putText(frame, f"MODEL: {model_name}", (frame.shape[1] - 220, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 210, 220), 1, cv2.LINE_AA)
+
+                _, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+                )
+                await asyncio.sleep(frame_delay)
+
+            cap.release()
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        generate(),
+        media_type="multipart/x-mixed-replace;boundary=frame",
+    )
+
+
+@app.post("/api/vdata/inspect_frame")
+async def api_vdata_inspect_frame(body: dict):
+    """
+    Inspect a specific frame from a vdata reference video.
+    Returns annotated frame image (base64), detection bounding boxes, confidence, and model metadata.
+    """
+    import base64
+
+    filename = body.get("filename", "")
+    frame_idx = int(body.get("frame_idx", 0))
+    video_path = Path("vdata") / filename
+    if not video_path.exists():
+        return JSONResponse(status_code=404, content={"status": "error", "message": f"Video '{filename}' not found."})
+
+    cap = cv2.VideoCapture(str(video_path))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+    frame_idx = max(0, min(frame_idx, total_frames - 1))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret or frame is None:
+        return JSONResponse(status_code=400, content={"status": "error", "message": f"Could not read frame {frame_idx}"})
+
+    h, w = frame.shape[:2]
+    target_w = 960
+    if w > target_w:
+        target_h = int(h * (target_w / w))
+        frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+    t0 = time.time()
+    poses = _state.pose.estimate(frame, t0) if _state.pose else []
+    pose = poses[0] if poses else None
+    person_bbox = pose.bbox if pose else None
+    left, right = _state.hand_tracker.track(pose, frame, t0, person_bbox=person_bbox) if _state.hand_tracker else (None, None)
+    detections = _state.detector.detect(frame, timestamp=t0, hands=(left, right)) if _state.detector else []
+    interactions = _state.interaction_tracker.update(left, right, detections, t0) if _state.interaction_tracker else []
+    latency_ms = round((time.time() - t0) * 1000.0, 1)
+
+    annotated = _annotate_frame(
+        frame=frame,
+        result=None,
+        objects=detections,
+        poses=poses,
+        left_hand=left,
+        right_hand=right,
+        interactions=interactions,
+        camera_name=f"Inspect: {filename}",
+        latency_ms=latency_ms,
+    )
+    _, buf = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    b64_img = base64.b64encode(buf).decode("utf-8")
+
+    det_list = []
+    for d in detections:
+        det_list.append({
+            "class_name": d.class_name,
+            "confidence": round(float(d.confidence), 3),
+            "bbox": list(d.bbox),
+            "centroid": list(getattr(d, "centroid", (0, 0))),
+            "source": getattr(d, "source", "yolo"),
+        })
+
+    for h_side, hand in [("left", left), ("right", right)]:
+        if hand and getattr(hand, "is_visible", False):
+            det_list.append({
+                "class_name": f"HAND ({h_side.upper()})",
+                "confidence": round(float(hand.confidence), 3),
+                "bbox": list(hand.bbox),
+                "centroid": [int(hand.position[0]), int(hand.position[1])],
+                "source": "hand_tracker",
+            })
+
+    return {
+        "filename": filename,
+        "frame_idx": frame_idx,
+        "total_frames": total_frames,
+        "latency_ms": latency_ms,
+        "model": Path(_state.detector.active_model_path).name if _state.detector else "yolov8n.pt",
+        "detections_count": len(det_list),
+        "detections": det_list,
+        "image_data": f"data:image/jpeg;base64,{b64_img}",
+    }
+
 
 
 # Serve React frontend (if built)

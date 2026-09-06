@@ -1,0 +1,22 @@
+{
+  "version": "orbita_har_gru_v32",
+  "is_production": true,
+  "dataset_version": "v2",
+  "training_samples": 540,
+  "test_accuracy": 1.0,
+  "test_f1": 1.0,
+  "training_time_s": 75.6,
+  "promoted": true,
+  "promotion_message": "Successfully promoted orbita_har_gru_v32 (+0.5375 accuracy).",
+  "per_class_f1": {
+    "IDLE": 1.0,
+    "OPEN": 1.0,
+    "TAKE": 1.0,
+    "PLACE": 1.0,
+    "TRANSFER": 1.0,
+    "CLOSE": 1.0,
+    "ACTIVATE": 1.0,
+    "PERFORM": 1.0,
+    "STORE": 1.0
+  }
+}

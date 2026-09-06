@@ -1,0 +1,16 @@
+{
+  "frame_id": "vid07_shift_left_f00093",
+  "trial_id": "vid07_shift_left",
+  "split": "train",
+  "source_video": "20260905_145858.mp4",
+  "source_frame": 93,
+  "status": "verified",
+  "verified_by": "lead_ml_engineer",
+  "dataset_version": "v3",
+  "warp_type": "shift_left",
+  "photometric": {
+    "gain": 1.0,
+    "bias": 0
+  },
+  "objects_count": 6
+}

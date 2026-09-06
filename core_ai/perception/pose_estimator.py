@@ -113,6 +113,11 @@ class PoseEstimator:
         self._model = None
         self._mp_pose = None
 
+        self._frame_count: int = 0
+        self._last_poses: list[PoseResult] = []
+        self.cadence: int = getattr(config, "cadence", 3)
+        self.imgsz: int = getattr(config, "imgsz", 480)
+
         if self.backend == "yolo":
             self._try_load_yolo(config.yolo_model_path)
             if self._model is None:
@@ -131,6 +136,7 @@ class PoseEstimator:
     def estimate(
         self, frame: np.ndarray, timestamp: float = 0.0
     ) -> list[PoseResult]:
+        self._frame_count += 1
         if self.backend == "yolo":
             return self._estimate_yolo(frame, timestamp)
         if self.backend == "mediapipe":
@@ -172,8 +178,27 @@ class PoseEstimator:
     def _estimate_yolo(
         self, frame: np.ndarray, timestamp: float
     ) -> list[PoseResult]:
+        # Temporal pose reuse: run neural pass every `cadence` frames
+        if (self._frame_count % self.cadence != 1) and self._last_poses:
+            return [
+                PoseResult(
+                    keypoints_px=p.keypoints_px.copy(),
+                    keypoints_conf=p.keypoints_conf.copy(),
+                    keypoints_norm=p.keypoints_norm.copy(),
+                    bbox=p.bbox,
+                    overall_confidence=p.overall_confidence,
+                    timestamp=timestamp,
+                )
+                for p in self._last_poses
+            ]
+
         try:
-            results = self._model.predict(frame, verbose=False, stream=False)
+            results = self._model.predict(
+                frame,
+                imgsz=self.imgsz,
+                verbose=False,
+                stream=False,
+            )
             poses: list[PoseResult] = []
             for r in results:
                 if r.keypoints is None:
@@ -202,10 +227,12 @@ class PoseEstimator:
                         overall_confidence=overall_conf,
                         timestamp=timestamp,
                     ))
+            if poses:
+                self._last_poses = poses
             return poses
         except Exception as exc:
             logger.warning("YOLO pose inference error: %s", exc)
-            return []
+            return self._last_poses if self._last_poses else []
 
     # ----------------------------------------------------------------------- #
     # MediaPipe backend

@@ -1,0 +1,60 @@
+{
+  "version": "orbita_yolo_detector_v2",
+  "is_production": false,
+  "dataset_version": "v2",
+  "training_samples": 73,
+  "train_duration_s": 139.4,
+  "weights_path": "C:\\project\\ORBITA\\models\\versions\\orbita_yolo_detector_v2\\best.pt",
+  "validation_metrics": {
+    "precision": 0.8853625490422409,
+    "recall": 0.018115942028985508,
+    "mAP50": 0.034733060574832574,
+    "mAP50-95": 0.00764773761393874
+  },
+  "test_metrics": {
+    "precision": 0.00030563784266704285,
+    "recall": 0.07103825136612021,
+    "mAP50": 0.0003228804440945763,
+    "mAP50-95": 5.469217051221527e-05
+  },
+  "per_class": {
+    "PERSON": {
+      "precision": 0.0018,
+      "recall": 0.4262,
+      "mAP50": 0.0019,
+      "mAP50-95": 0.0003
+    },
+    "MAIN_BOX": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "mAP50": 0.0,
+      "mAP50-95": 0.0
+    },
+    "RED_BOX": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "mAP50": 0.0,
+      "mAP50-95": 0.0
+    },
+    "YELLOW_BOX": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "mAP50": 0.0,
+      "mAP50-95": 0.0
+    },
+    "SAMPLE": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "mAP50": 0.0,
+      "mAP50-95": 0.0
+    },
+    "TOOL": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "mAP50": 0.0,
+      "mAP50-95": 0.0
+    }
+  },
+  "promoted": false,
+  "promotion_message": "Promotion rejected: mAP50 diff (-0.1408) < 0.0010."
+}
