@@ -142,6 +142,7 @@ class ObjectDetector:
 
         # Temporal smoother to eliminate jitter & brief occlusions
         self._tracked_objects: Dict[str, Dict[str, Any]] = {}
+        self._frame_count: int = 0
 
     # ----------------------------------------------------------------------- #
     # Public API
@@ -155,6 +156,7 @@ class ObjectDetector:
         """
         Run robust detection and multi-object tracking on a single BGR frame.
         """
+        self._frame_count += 1
         objects: list[DetectedObject] = []
 
         if self._yolo is not None:
@@ -174,7 +176,21 @@ class ObjectDetector:
                 }
                 missing_boxes = missing_boxes - tracked_classes
 
-            if missing_boxes:
+            # Auxiliary chroma scheduling:
+            # - Immediate recovery if a missing box was tracked recently (<=15 frames)
+            # - Low-cadence periodic discovery (every 6 frames) for new boxes
+            recently_seen_classes = set()
+            if hasattr(self, "tracker") and hasattr(self.tracker, "tracks"):
+                recently_seen_classes = {
+                    t.class_name for t in self.tracker.tracks.values()
+                    if getattr(t, "time_since_update", 999) <= 15
+                }
+            should_run_chroma = (
+                bool(missing_boxes & recently_seen_classes)
+                or (self._frame_count % 6 == 0)
+            )
+
+            if missing_boxes and should_run_chroma:
                 chroma_objs = self._detect_chroma(
                     frame,
                     timestamp,
@@ -349,13 +365,13 @@ class ObjectDetector:
         hands: Optional[tuple[Any, Any]] = None,
     ) -> list[DetectedObject]:
         H, W = frame.shape[:2]
-        downscale = 2 if (W > 640 and H > 360) else 1
+        downscale = max(1, int(round(W / 480.0))) if (W > 640 and H > 360) else 1
         if downscale > 1:
             frame_work = cv2.resize(frame, (W // downscale, H // downscale), interpolation=cv2.INTER_LINEAR)
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         else:
             frame_work = frame
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
 
         hsv = cv2.cvtColor(frame_work, cv2.COLOR_BGR2HSV)
         results: list[DetectedObject] = []

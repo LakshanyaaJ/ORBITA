@@ -406,20 +406,22 @@ class HandTracker:
         if person_bbox is None and pose is not None and getattr(pose, "bbox", None) is not None:
             person_bbox = pose.bbox
 
-        # Phase 1: High-Speed Track-Guided ROI Inference / Temporal Motion Reuse
+        # Phase 1: High-Speed Track-Guided ROI Inference & Motion-Adaptive Temporal Reuse
         detected_candidates = []
         active_tracks = [t for t in self.tracks.values() if t.track_status in ("TRACKED", "OCCLUDED")]
         tracked_sides_detected = set()
 
         for t in active_tracks:
-            # Temporal Hand Reuse: If hand is solidly tracked, moving slowly (<35 px/s),
-            # and hasn't exceeded 2 consecutive temporal reuses, reuse kinematically
+            # Motion-Adaptive Temporal Hand Reuse:
+            # Stationary / slow hand (<50 px/s): allow up to 2 consecutive temporal reuses
+            # Moderate hand (50-150 px/s): allow 1 temporal reuse
+            # Fast hand (>=150 px/s): force fresh neural inference every frame
+            max_reuse = 2 if t.speed < 50.0 else (1 if t.speed < 150.0 else 0)
             if (
                 t.track_status == "TRACKED"
-                and t.confidence >= 0.75
-                and t.speed < 35.0
-                and t.temporal_reuse_count < 2
-                and (self._frame_count % 3 != 0)
+                and t.confidence >= 0.60
+                and t.temporal_reuse_count < max_reuse
+                and (self._frame_count % 4 != 0)
             ):
                 t.update_temporal(timestamp)
                 tracked_sides_detected.add(t.side)
@@ -453,18 +455,53 @@ class HandTracker:
                         })
                         tracked_sides_detected.add(t.side)
 
-        # Phase 2: Person-ROI Guided Acquisition & Fallback Workspace Scan
-        # Only scan if active tracks are empty, or if an expected track was lost in ROI,
-        # or periodically (every 15 frames) for discovery of new hands
+        # Phase 2: Person-Guided Acquisition & Fallback Workspace Scan
+        # Only scan if active tracks are empty, or if an expected track was lost in ROI
+        missing_count = len(self.tracks) - len(tracked_sides_detected)
         need_scan = (
             len(active_tracks) == 0
             or (len(tracked_sides_detected) < len(active_tracks))
-            or (self._frame_count % 15 == 0)
+            or (missing_count > 0 and self._frame_count % 8 == 0)
         )
         if need_scan:
             scan_performed = False
-            # Option A: Person-ROI Guided Inference (expand by 15-20%)
-            if person_bbox is not None and person_bbox[2] > 40 and person_bbox[3] > 40:
+            # Option A1: Wrist-guided ROI from Pose (fast targeted ~160x160 patch)
+            if pose is not None and getattr(pose, "keypoints_px", None) is not None:
+                for w_idx, side_name in [(9, "left"), (10, "right")]:
+                    if side_name not in tracked_sides_detected:
+                        kp_conf = pose.keypoints_conf[w_idx] if hasattr(pose, "keypoints_conf") else 0.0
+                        if kp_conf > 0.35:
+                            wx, wy = int(pose.keypoints_px[w_idx, 0]), int(pose.keypoints_px[w_idx, 1])
+                            pad = 80
+                            x1 = max(0, wx - pad)
+                            y1 = max(0, wy - pad)
+                            x2 = min(W, wx + pad)
+                            y2 = min(H, wy + pad)
+                            if (x2 - x1) >= 64 and (y2 - y1) >= 64:
+                                wrist_roi = frame[y1:y2, x1:x2]
+                                w_cands = self._detect_raw_hands(wrist_roi)
+                                for c in w_cands:
+                                    c_pts = c["pts"].copy()
+                                    c_pts[:, 0] += x1
+                                    c_pts[:, 1] += y1
+                                    c_wrist = c["wrist"].copy()
+                                    c_wrist[0] += x1
+                                    c_wrist[1] += y1
+                                    bx, by, bw, bh = c["bbox"]
+                                    c_bbox = (bx + x1, by + y1, bw, bh)
+                                    detected_candidates.append({
+                                        "side": side_name,
+                                        "wrist": c_wrist,
+                                        "pts": c_pts,
+                                        "bbox": c_bbox,
+                                        "score": c["score"],
+                                        "lm_conf": c["lm_conf"],
+                                    })
+                                    tracked_sides_detected.add(side_name)
+                                    scan_performed = True
+
+            # Option A2: Person-ROI Guided Inference (expand by 15-20%) if hands still missing
+            if (len(tracked_sides_detected) == 0 and len(detected_candidates) == 0) and person_bbox is not None and person_bbox[2] > 40 and person_bbox[3] > 40:
                 rx, ry, rw, rh = expand_person_roi(person_bbox, (H, W), expansion_ratio=0.18)
                 if rw >= 64 and rh >= 64:
                     person_roi = frame[ry:ry+rh, rx:rx+rw]
@@ -495,11 +532,12 @@ class HandTracker:
                             })
                     scan_performed = True
 
-            # Option B: Full-Frame Fallback (ONLY when no hands tracked and person absent, or periodic sync)
+            # Option B: Full-Frame Fallback (ONLY when NO hands tracked AND person absent/undetected)
             need_full_frame = (
-                (not scan_performed and len(tracked_sides_detected) == 0 and len(detected_candidates) == 0)
-                or (self._frame_count % 20 == 0)
-                or all(t.track_status == "LOST" for t in self.tracks.values())
+                not scan_performed
+                and len(tracked_sides_detected) == 0
+                and len(detected_candidates) == 0
+                and all(t.track_status == "LOST" for t in self.tracks.values())
             )
             if need_full_frame:
                 full_candidates = self._detect_raw_hands(frame)

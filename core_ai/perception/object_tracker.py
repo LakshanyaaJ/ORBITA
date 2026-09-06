@@ -71,6 +71,7 @@ class MultiObjectTracker:
         self.max_age = max_age
         self.min_hits = min_hits
         self.iou_threshold = iou_threshold
+        self._next_id: int = 1
         self._tracks: Dict[int, TrackedState] = {}
         self._primary_operator_id: Optional[int] = None
 
