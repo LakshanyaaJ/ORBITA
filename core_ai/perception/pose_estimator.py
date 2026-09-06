@@ -179,18 +179,20 @@ class PoseEstimator:
         self, frame: np.ndarray, timestamp: float
     ) -> list[PoseResult]:
         # Temporal pose reuse: run neural pass every `cadence` frames
-        if (self._frame_count % self.cadence != 1) and self._last_poses:
-            return [
-                PoseResult(
-                    keypoints_px=p.keypoints_px.copy(),
-                    keypoints_conf=p.keypoints_conf.copy(),
-                    keypoints_norm=p.keypoints_norm.copy(),
-                    bbox=p.bbox,
-                    overall_confidence=p.overall_confidence,
-                    timestamp=timestamp,
-                )
-                for p in self._last_poses
-            ]
+        if (self._frame_count % self.cadence != 1):
+            if self._last_poses:
+                return [
+                    PoseResult(
+                        keypoints_px=p.keypoints_px.copy(),
+                        keypoints_conf=p.keypoints_conf.copy(),
+                        keypoints_norm=p.keypoints_norm.copy(),
+                        bbox=p.bbox,
+                        overall_confidence=p.overall_confidence,
+                        timestamp=timestamp,
+                    )
+                    for p in self._last_poses
+                ]
+            return []
 
         try:
             results = self._model.predict(

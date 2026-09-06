@@ -66,6 +66,7 @@ class DetectionConfig:
     use_yolo: bool = True           # Falls back to chroma-only if False or model absent
     confidence_threshold: float = 0.40
     min_area_px: int = 400          # Ignore tiny detections
+    yolo_imgsz: int = 480
 
 
 # --------------------------------------------------------------------------- #
@@ -77,6 +78,8 @@ class PoseConfig:
     yolo_model_path: str = str(MODELS_DIR / "yolov8n-pose.pt")
     confidence_threshold: float = 0.40
     normalize_to_torso: bool = True
+    cadence: int = 3
+    imgsz: int = 480
 
 
 # --------------------------------------------------------------------------- #
