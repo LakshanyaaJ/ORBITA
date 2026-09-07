@@ -75,7 +75,8 @@ class ActionConfirmationGate:
 
         self._event_counter: int = 0
         self._active_wrong_event_id: Optional[str] = None
-        self._active_wrong_signature: Optional[Tuple[str, str, Optional[int]]] = None
+        self._wrong_episode_active: bool = False
+        self._frames_since_wrong: int = 0
 
         self._last_confirmed_action: Optional[ConfirmedAction] = None
         self._current_gate_status: ActionGateStatus = ActionGateStatus.WAITING
@@ -91,7 +92,8 @@ class ActionConfirmationGate:
         self._held_start_time.clear()
         self._event_counter = 0
         self._active_wrong_event_id = None
-        self._active_wrong_signature = None
+        self._wrong_episode_active = False
+        self._frames_since_wrong = 0
         self._last_confirmed_action = None
         self._current_gate_status = ActionGateStatus.WAITING
         logger.info("ActionConfirmationGate: Reset complete.")
@@ -106,17 +108,17 @@ class ActionConfirmationGate:
         track_id: Optional[int] = None,
         timestamp: float = 0.0,
     ) -> ConfirmedAction:
-        signature = (action, object_name, track_id)
-        if self._active_wrong_signature == signature and self._active_wrong_event_id is not None:
-            # Same ongoing wrong action event! Deduplicated!
+        self._frames_since_wrong = 0
+        if self._wrong_episode_active:
+            # Same ongoing wrong action episode! Deduplicated!
             is_new = False
-            event_id = self._active_wrong_event_id
+            event_id = self._active_wrong_event_id or f"WRONG_ACTION_EVENT_{self._event_counter:03d}"
         else:
-            # Brand new wrong action event
+            # Brand new wrong action episode
             self._event_counter += 1
             event_id = f"WRONG_ACTION_EVENT_{self._event_counter:03d}"
             self._active_wrong_event_id = event_id
-            self._active_wrong_signature = signature
+            self._wrong_episode_active = True
             is_new = True
 
         self._current_gate_status = ActionGateStatus.CONFIRMED_WRONG
@@ -300,6 +302,9 @@ class ActionConfirmationGate:
                 # Check if wrong object was identified instead
                 conf = float(obj_map[exp_obj_canonical].confidence) if exp_obj_canonical in obj_map else 0.85
                 self._current_gate_status = ActionGateStatus.CONFIRMED_CORRECT
+                self._active_wrong_event_id = None
+                self._wrong_episode_active = False
+                self._frames_since_wrong = 0
                 action_res = ConfirmedAction(
                     action="IDENTIFY",
                     object_name=exp_obj_canonical,
@@ -347,7 +352,8 @@ class ActionConfirmationGate:
             if (held_frames >= self.min_pickup_frames) or (has_contact and held_frames >= 2):
                 self._current_gate_status = ActionGateStatus.CONFIRMED_CORRECT
                 self._active_wrong_event_id = None
-                self._active_wrong_signature = None
+                self._wrong_episode_active = False
+                self._frames_since_wrong = 0
                 action_res = ConfirmedAction(
                     action="PICKUP",
                     object_name=exp_obj_canonical,
@@ -359,10 +365,12 @@ class ActionConfirmationGate:
                 self._last_confirmed_action = action_res
                 return action_res
 
-            # Clean wrong signature if nothing is held
+            # Clean wrong episode if nothing is held for sustained period
             if not any(self._consecutive_held.get(o, 0) > 0 for o in ["BLUE_BOX", "YELLOW_BOX", "PEN", "WATCH"] if o != exp_obj_canonical):
-                self._active_wrong_event_id = None
-                self._active_wrong_signature = None
+                self._frames_since_wrong += 1
+                if self._frames_since_wrong >= 5:
+                    self._active_wrong_event_id = None
+                    self._wrong_episode_active = False
 
             self._current_gate_status = ActionGateStatus.WAITING
             return ConfirmedAction(
@@ -427,7 +435,8 @@ class ActionConfirmationGate:
             if (is_released and in_target) or (in_target and det is not None and curr_held == 0 and was_held):
                 self._current_gate_status = ActionGateStatus.CONFIRMED_CORRECT
                 self._active_wrong_event_id = None
-                self._active_wrong_signature = None
+                self._wrong_episode_active = False
+                self._frames_since_wrong = 0
                 action_res = ConfirmedAction(
                     action="PLACE",
                     object_name=exp_obj_canonical,
@@ -455,10 +464,12 @@ class ActionConfirmationGate:
                     timestamp=now,
                 )
 
-            # Clean wrong signature if nothing is held
+            # Clean wrong episode if nothing is held for sustained period
             if not any(self._consecutive_held.get(o, 0) > 0 for o in ["BLUE_BOX", "YELLOW_BOX", "PEN", "WATCH"] if o != exp_obj_canonical):
-                self._active_wrong_event_id = None
-                self._active_wrong_signature = None
+                self._frames_since_wrong += 1
+                if self._frames_since_wrong >= 5:
+                    self._active_wrong_event_id = None
+                    self._wrong_episode_active = False
 
             self._current_gate_status = ActionGateStatus.WAITING
             return ConfirmedAction(
@@ -505,7 +516,8 @@ class ActionConfirmationGate:
             if (was_held and curr_held == 0 and reached_destination) or (reached_destination and (exp_obj_canonical in released_objects)):
                 self._current_gate_status = ActionGateStatus.CONFIRMED_CORRECT
                 self._active_wrong_event_id = None
-                self._active_wrong_signature = None
+                self._wrong_episode_active = False
+                self._frames_since_wrong = 0
                 action_res = ConfirmedAction(
                     action="MOVE",
                     object_name=exp_obj_canonical,
@@ -519,10 +531,12 @@ class ActionConfirmationGate:
                 self._last_confirmed_action = action_res
                 return action_res
 
-            # Clean wrong signature if nothing is held
+            # Clean wrong episode if nothing is held for sustained period
             if not any(self._consecutive_held.get(o, 0) > 0 for o in ["BLUE_BOX", "YELLOW_BOX", "PEN", "WATCH"] if o != exp_obj_canonical):
-                self._active_wrong_event_id = None
-                self._active_wrong_signature = None
+                self._frames_since_wrong += 1
+                if self._frames_since_wrong >= 5:
+                    self._active_wrong_event_id = None
+                    self._wrong_episode_active = False
 
             self._current_gate_status = ActionGateStatus.WAITING
             return ConfirmedAction(
@@ -539,7 +553,8 @@ class ActionConfirmationGate:
         elif exp_action == "COMPLETE":
             self._current_gate_status = ActionGateStatus.CONFIRMED_CORRECT
             self._active_wrong_event_id = None
-            self._active_wrong_signature = None
+            self._wrong_episode_active = False
+            self._frames_since_wrong = 0
             action_res = ConfirmedAction(
                 action="COMPLETE",
                 object_name="ALL",
