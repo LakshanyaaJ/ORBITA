@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "../mission-control.css";
 import CameraControlPanel from "../../components/camera/CameraControlPanel";
-import { BACKEND_BASE } from "../../api/camera";
+import { BACKEND_BASE, getCameraStatus, connectCamera } from "../../api/camera";
 import {
   Activity,
   AlertTriangle,
@@ -172,6 +172,11 @@ function CameraFeed({
     const interval = setInterval(pollStatus, 2500);
     return () => clearInterval(interval);
   }, [streamError]);
+
+  useEffect(() => {
+    setStreamError(false);
+    setStreamVersion(Date.now());
+  }, [demoMode]);
 
   const sourceName = cameraSource === "ip_camera" 
     ? "PHONE IP STREAM" 
@@ -514,16 +519,139 @@ function ProcedurePage() {
   return <div className="page-content"><div className="page-intro"><div><div className="eyebrow">PROCEDURE LIBRARY / ACTIVE RUN</div><h1>Procedure Verification</h1><p>Emergency Equipment Deployment · Procedure ALPHA-EED-08.</p></div><StatusPill tone="verified">STEP 04 OF 08</StatusPill></div><div className="procedure-page-grid"><section className="panel procedure-detail-panel"><SectionHeading eyebrow="ACTIVE PROCEDURE" title="Emergency Equipment Deployment" action={<span className="panel-code">ALPHA-EED-08</span>} /><div className="large-progress"><div className="large-progress-top"><span>Mission completion</span><strong>50%</strong></div><div className="large-progress-track"><div style={{ width: "50%" }} /></div></div><ProcedureTimeline /></section><section className="panel"><SectionHeading eyebrow="CURRENT CHECK" title="Action verification" /><div className="check-detail"><div className="check-badge"><AlertTriangle size={20} /></div><span className="eyebrow">STEP 04 · WARNING</span><h3>Position tool</h3><p>Tool detected in the docking workflow, but spatial deviation is outside the expected tolerance.</p><div className="check-metrics"><div><span>Deviation</span><strong>4.2 cm</strong></div><div><span>Confidence</span><strong>91.3%</strong></div><div><span>Next action</span><strong>Reposition</strong></div></div><button className="primary-button">View event details <ChevronRight size={15} /></button></div></section></div></div>;
 }
 
-function SettingsPage({ demoMode, setDemoMode }: { demoMode: boolean; setDemoMode: (value: boolean) => void }) {
-  return <div className="page-content"><div className="page-intro"><div><div className="eyebrow">SYSTEM CONFIGURATION</div><h1>Settings</h1><p>Configure mission display, data source, and operational preferences.</p></div></div><div className="settings-grid"><section className="panel settings-panel"><SectionHeading eyebrow="DATA SOURCE" title="Monitoring mode" /><div className="setting-row"><div><strong>Demo mode</strong><span>Use simulated telemetry when no WebSocket source is connected.</span></div><button className={`switch ${demoMode ? "on" : ""}`} onClick={() => setDemoMode(!demoMode)} aria-label="Toggle demo mode"><span /></button></div><div className="setting-row"><div><strong>WebSocket endpoint</strong><span className="mono">ws://localhost:8765/orbita</span></div><span className="connection-state"><span className="sync-dot" /> Ready</span></div></section><section className="panel settings-panel"><SectionHeading eyebrow="DISPLAY" title="Operator preferences" /><div className="setting-row"><div><strong>Compact telemetry</strong><span>Prioritize information density for 1366px displays.</span></div><button className="switch on" aria-label="Compact telemetry enabled"><span /></button></div><div className="setting-row"><div><strong>Alert sound</strong><span>Play a subtle tone for critical deviations only.</span></div><button className="switch on" aria-label="Alert sound enabled"><span /></button></div></section></div></div>;
+function SettingsPage({ 
+  demoMode, 
+  onToggleDemoMode, 
+  switchingSource 
+}: { 
+  demoMode: boolean; 
+  onToggleDemoMode: () => void; 
+  switchingSource?: boolean; 
+}) {
+  return (
+    <div className="page-content">
+      <div className="page-intro">
+        <div>
+          <div className="eyebrow">SYSTEM CONFIGURATION</div>
+          <h1>Settings</h1>
+          <p>Configure mission display, data source, and operational preferences.</p>
+        </div>
+      </div>
+      <div className="settings-grid">
+        <section className="panel settings-panel">
+          <SectionHeading eyebrow="DATA SOURCE" title="Monitoring mode" />
+          <div className="setting-row">
+            <div>
+              <strong>Demo mode (Synthetic Simulation)</strong>
+              <span>
+                {demoMode 
+                  ? "Synthetic simulation mode active. Emulating procedure stream." 
+                  : "Live camera mode active. Streaming from physical webcam or mobile IP stream."}
+              </span>
+            </div>
+            <button 
+              className={`switch ${demoMode ? "on" : ""}`} 
+              onClick={onToggleDemoMode} 
+              disabled={switchingSource}
+              aria-label="Toggle demo mode"
+            >
+              <span />
+            </button>
+          </div>
+          <div className="setting-row">
+            <div>
+              <strong>WebSocket endpoint</strong>
+              <span className="mono">ws://localhost:8000/ws/telemetry</span>
+            </div>
+            <span className="connection-state">
+              <span className="sync-dot" /> Ready
+            </span>
+          </div>
+        </section>
+        <section className="panel settings-panel">
+          <SectionHeading eyebrow="DISPLAY" title="Operator preferences" />
+          <div className="setting-row">
+            <div>
+              <strong>Compact telemetry</strong>
+              <span>Prioritize information density for 1366px displays.</span>
+            </div>
+            <button className="switch on" aria-label="Compact telemetry enabled">
+              <span />
+            </button>
+          </div>
+          <div className="setting-row">
+            <div>
+              <strong>Alert sound</strong>
+              <span>Play a subtle tone for critical deviations only.</span>
+            </div>
+            <button className="switch on" aria-label="Alert sound enabled">
+              <span />
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
 }
 
 export default function Home() {
   const navigate = useNavigate();
   const [activeNav, setActiveNav] = useState("Dashboard");
   const [demoMode, setDemoMode] = useState(true);
+  const [switchingSource, setSwitchingSource] = useState(false);
+  const [, setSourceNotice] = useState<string | null>(null);
   const [confidence, setConfidence] = useState(97.4);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Sync initial mode with backend camera source
+  useEffect(() => {
+    getCameraStatus()
+      .then((status) => {
+        if (status && status.source) {
+          setDemoMode(status.source === "sim");
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Real function: toggles between Simulation (DEMO) and Live Camera Hardware
+  const handleToggleDataSource = async () => {
+    if (switchingSource) return;
+    setSwitchingSource(true);
+    setSourceNotice(null);
+
+    const willBeDemo = !demoMode;
+    try {
+      if (willBeDemo) {
+        const res = await connectCamera({ source: "sim" });
+        if (res.success) {
+          setDemoMode(true);
+          setSourceNotice("Switched to Synthetic Simulation Feed");
+        } else {
+          setSourceNotice(`Error: ${res.error}`);
+        }
+      } else {
+        let res = await connectCamera({ source: "jetson_camera", device_index: 0 });
+        if (res.success) {
+          setDemoMode(false);
+          setSourceNotice("Live Camera Connected (Device Index 0)");
+        } else {
+          const ipRes = await connectCamera({ source: "ip_camera" });
+          if (ipRes.success) {
+            setDemoMode(false);
+            setSourceNotice("Connected to Phone IP Camera");
+          } else {
+            setDemoMode(false);
+            setSourceNotice("Live Mode active. Connect Phone Cam or USB Camera.");
+          }
+        }
+      }
+    } catch (err: any) {
+      setSourceNotice(err?.message || "Failed to switch camera mode");
+    } finally {
+      setSwitchingSource(false);
+    }
+  };
 
   useEffect(() => {
     if (!demoMode) return;
@@ -544,7 +672,7 @@ export default function Home() {
         : activeNav === "Mission" ? <MissionPage />
           : activeNav === "Alerts" ? <AlertsPage />
             : activeNav === "Procedure" ? <ProcedurePage />
-              : <SettingsPage demoMode={demoMode} setDemoMode={setDemoMode} />;
+              : <SettingsPage demoMode={demoMode} onToggleDemoMode={handleToggleDataSource} switchingSource={switchingSource} />;
 
   return (
     <div className="orbita-shell">
@@ -575,7 +703,19 @@ export default function Home() {
           <button className="mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={20} /></button>
           <div className="topbar-context"><span className="topbar-kicker">MISSION</span><strong>ALPHA-01</strong><span className="topbar-divider" /><span className="topbar-status"><span className="sync-dot" /> SYSTEM ONLINE</span></div>
           <div className="topbar-right">
-            <div className="mode-control"><span className="mode-label">DATA SOURCE</span><button className={`mode-toggle ${demoMode ? "demo" : "live"}`} onClick={() => setDemoMode(!demoMode)}><span className="toggle-knob" /><span>{demoMode ? "DEMO" : "LIVE"}</span></button></div>
+            <div className="mode-control">
+              <span className="mode-label">DATA SOURCE</span>
+              <button 
+                className={`mode-toggle ${demoMode ? "demo" : "live"}`} 
+                onClick={handleToggleDataSource}
+                disabled={switchingSource}
+                title={demoMode ? "Current: Simulation Feed (DEMO). Click to switch to Live Camera Hardware" : "Current: Live Camera Stream. Click to switch to Simulation Feed (DEMO)"}
+                style={{ cursor: switchingSource ? 'wait' : 'pointer', opacity: switchingSource ? 0.7 : 1 }}
+              >
+                <span className="toggle-knob" />
+                <span>{switchingSource ? "..." : demoMode ? "DEMO" : "LIVE"}</span>
+              </button>
+            </div>
             <div className="topbar-time mono">{timeLabel}<span>UTC</span></div>
             <button className="icon-button" aria-label="Open notifications" onClick={() => setActiveNav("Alerts")}><Bell size={17} /><i /></button>
             <button

@@ -42,7 +42,7 @@ export default function PageShell() {
               />
               <NavButton 
                 active={location.pathname.includes('/log')} 
-                onClick={() => navigate('/experiments/EXP-04/log')}
+                onClick={() => navigate('/experiments/EXP-01/log')}
                 icon={<Settings size={16} strokeWidth={2} />}
                 label="LOG"
               />

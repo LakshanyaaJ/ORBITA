@@ -95,16 +95,17 @@ export default function MissionHome() {
           
           <div className="space-y-4">
             <ExperimentCard 
-              id="EXP-04" 
-              name="SEED GERMINATION" 
-              payload="VEG-03 PAYLOAD"
-              steps={7} 
+              id="EXP-01" 
+              name="YELLOW AND BLUE BOX" 
+              payload="BOX-01 PAYLOAD"
+              steps={2} 
               status="READY"
-              description="Biological growth substrate hydration, canister seal verification, and lighting cycle activation."
-              onClick={() => navigate('/experiments/EXP-04/briefing')}
+              description="Autonomous identification, manipulation, and placement validation of Yellow and Blue box experiment assets."
+              nextAction="Step 01 Identify Blue Box"
+              onClick={() => navigate('/experiments/EXP-01/briefing')}
             />
             <ExperimentCard 
-              id="EXP-07" 
+              id="EXP-02" 
               name="SAMPLE ANALYSIS" 
               payload="BIO-CHAMBER 02"
               steps={5} 
@@ -202,6 +203,7 @@ function ExperimentCard({
   steps, 
   status, 
   description, 
+  nextAction = "Step 01 Identify Blue Box",
   onClick 
 }: { 
   id: string, 
@@ -210,6 +212,7 @@ function ExperimentCard({
   steps: number, 
   status: string, 
   description: string, 
+  nextAction?: string,
   onClick: () => void 
 }) {
   const isReady = status === 'READY';
@@ -265,7 +268,7 @@ function ExperimentCard({
 
       {isReady && (
         <div className="mt-4 pt-3 border-t border-space-600/40 flex items-center justify-between text-xs font-mono">
-          <span className="text-space-400">Next Action: Step 01 Hydration</span>
+          <span className="text-space-400">Next Action: {nextAction}</span>
           <span className="text-accent-cyan font-bold group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
             START EXPERIMENT &rarr;
           </span>

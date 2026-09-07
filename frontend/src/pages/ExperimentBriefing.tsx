@@ -6,16 +6,17 @@ export default function ExperimentBriefing() {
   const navigate = useNavigate();
   const { id } = useParams();
 
-  // Hardcode EXP-04 briefing for now. In real app, fetch from backend.
-  const isExp04 = id === 'EXP-04';
+  // EXP-01 (Yellow & Blue Box) vs EXP-02 (Sample Analysis) briefing
+  const isYellowBlueBox = !id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04';
+  const isSampleAnalysis = id === 'EXP-02' || id === 'EXP-2' || id === 'EXP-07';
 
   return (
     <div className="p-8 max-w-4xl mx-auto flex flex-col h-full">
       <div className="mb-8">
         <h1 className="text-3xl font-bold font-mono tracking-widest text-space-100 mb-2">
-          {isExp04 ? 'SEED GERMINATION' : 'UNKNOWN EXPERIMENT'}
+          {isYellowBlueBox ? 'YELLOW AND BLUE BOX' : (isSampleAnalysis ? 'SAMPLE ANALYSIS' : 'UNKNOWN EXPERIMENT')}
         </h1>
-        <div className="font-mono text-accent-cyan tracking-widest">{id}</div>
+        <div className="font-mono text-accent-cyan tracking-widest">{id || 'EXP-01'}</div>
       </div>
 
       <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-12 overflow-y-auto">
@@ -25,7 +26,7 @@ export default function ExperimentBriefing() {
               OBJECTIVE
             </h2>
             <p className="text-space-100 leading-relaxed text-sm">
-              Study seed growth under microgravity conditions. Validates the viability of on-board agriculture using standard nutrient gel containers. Ensure proper sealing to prevent nutrient leak into cabin atmosphere.
+              Autonomous identification, manipulation, and placement validation of Yellow Box and Blue Box physical assets. Validates procedural order, object classification, and spatial placement under computer vision copilot guidance.
             </p>
           </section>
 
@@ -34,20 +35,14 @@ export default function ExperimentBriefing() {
               PROTOCOL
             </h2>
             <div className="font-mono text-2xl font-bold text-space-100 mb-4">
-              07 STEPS
+              02 STEPS
             </div>
             <ul className="space-y-3 font-mono text-sm">
               <li className="flex items-center gap-3 text-space-100">
-                <span className="text-space-400">01</span> PREPARE CONTAINER
+                <span className="text-space-400">01</span> IDENTIFY BLUE BOX
               </li>
               <li className="flex items-center gap-3 text-space-100">
-                <span className="text-space-400">02</span> ADD WATER
-              </li>
-              <li className="flex items-center gap-3 text-space-100">
-                <span className="text-space-400">03</span> ADD SEEDS
-              </li>
-              <li className="flex items-center gap-3 text-space-100">
-                <span className="text-space-400">04</span> CLOSE CONTAINER
+                <span className="text-space-400">02</span> PICK UP / IDENTIFY YELLOW BOX
               </li>
               <li className="flex items-center gap-3 text-space-400">...</li>
             </ul>
@@ -60,10 +55,10 @@ export default function ExperimentBriefing() {
               REQUIRED EQUIPMENT
             </h2>
             <div className="grid grid-cols-2 gap-4">
-              <EquipmentItem name="GEL CONTAINER" />
-              <EquipmentItem name="WATER SYRINGE" />
-              <EquipmentItem name="SEED PACKET" />
-              <EquipmentItem name="TOWEL" />
+              <EquipmentItem name="BLUE BOX" />
+              <EquipmentItem name="YELLOW BOX" />
+              <EquipmentItem name="LOCATION A" />
+              <EquipmentItem name="LOCATION B" />
             </div>
           </section>
 
