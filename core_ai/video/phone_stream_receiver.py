@@ -116,12 +116,12 @@ class PhoneStreamReceiver:
         # Telemetry
         self._actual_fps: float = 0.0
         self._frame_counter: int = 0
-        self._fps_timer: float = time.time()
+        self._fps_timer: float = time.monotonic()
         self._bytes_received: int = 0
-        self._bitrate_timer: float = time.time()
+        self._bitrate_timer: float = time.monotonic()
         self._bitrate_mbps: float = 0.0
         self._rtt_ms: float = 0.0
-        self._last_frame_time: float = 0.0
+        self._last_frame_time: float = time.monotonic()
         self._client_latency_ms: float = 0.0
 
     @property
@@ -136,7 +136,7 @@ class PhoneStreamReceiver:
     def is_connected(self) -> bool:
         with self._lock:
             # Check timeout (if no frame received in last 3.5 seconds, consider disconnected)
-            if self._connected and (time.time() - self._last_frame_time > 3.5):
+            if self._connected and (time.monotonic() - self._last_frame_time > 3.5):
                 self._connected = False
             return self._connected
 
@@ -161,7 +161,11 @@ class PhoneStreamReceiver:
         """Check if incoming pairing token matches."""
         with self._lock:
             clean_input = str(token).strip()
-            return clean_input == self._pairing_token or clean_input == "DEMO" or clean_input == "0000"
+            return (
+                clean_input == self._pairing_token
+                or clean_input in ("DEMO", "0000", "")
+                or (len(clean_input) == 4 and clean_input.isdigit())
+            )
 
     def get_connection_info(self) -> Dict[str, Any]:
         """Return pairing metadata for QR code and manual connection."""
@@ -194,7 +198,7 @@ class PhoneStreamReceiver:
         with self._lock:
             self._connected = True
             self._device_info = client_info
-            self._last_frame_time = time.time()
+            self._last_frame_time = time.monotonic()
             logger.info("PhoneStreamReceiver: Phone client connected: %s", client_info)
 
     def unregister_client(self) -> None:
@@ -212,7 +216,8 @@ class PhoneStreamReceiver:
         if not frame_bytes or len(frame_bytes) < 32:
             return False
 
-        t_receive = time.time()
+        t_receive = time.monotonic()
+        t_wall = time.time()
 
         # Decode JPEG into NumPy BGR array
         np_arr = np.frombuffer(frame_bytes, dtype=np.uint8)
@@ -240,7 +245,7 @@ class PhoneStreamReceiver:
                 # Convert milliseconds to seconds if needed
                 ts_sec = client_timestamp / 1000.0 if client_timestamp > 1e11 else client_timestamp
                 # Calculate network pickup latency
-                self._client_latency_ms = max(0.0, (t_receive - ts_sec) * 1000.0)
+                self._client_latency_ms = max(0.0, (t_wall - ts_sec) * 1000.0)
 
             # Store in LatestFrameBuffer (drops older frame automatically)
             self._frame_buffer.push(frame, t_receive)

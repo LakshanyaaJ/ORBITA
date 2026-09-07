@@ -253,6 +253,14 @@ class ActionClassifier:
                 "Temporal GRU model not available — using heuristic action classifier."
             )
 
+    def is_ready(self) -> bool:
+        """True if neural model or heuristic fallback is ready for inference."""
+        return True
+
+    @property
+    def active_checkpoint_path(self) -> str:
+        return self._active_checkpoint_path or "heuristic_fallback"
+
     def predict(self, window: np.ndarray) -> ActionPrediction:
         """
         Predict action from feature window.

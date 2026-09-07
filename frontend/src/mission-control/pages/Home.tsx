@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "../mission-control.css";
 import CameraControlPanel from "../../components/camera/CameraControlPanel";
+import { BACKEND_BASE } from "../../api/camera";
 import {
   Activity,
   AlertTriangle,
@@ -155,7 +156,7 @@ function CameraFeed({
 
   useEffect(() => {
     const pollStatus = () => {
-      fetch("http://localhost:8000/api/camera/status")
+      fetch(`${BACKEND_BASE}/api/camera/status`)
         .then((r) => r.json())
         .then((data) => {
           if (data.source) setCameraSource(data.source);
@@ -168,7 +169,7 @@ function CameraFeed({
         .catch(() => {});
     };
     pollStatus();
-    const interval = setInterval(pollStatus, 3000);
+    const interval = setInterval(pollStatus, 2500);
     return () => clearInterval(interval);
   }, [streamError]);
 
@@ -190,7 +191,7 @@ function CameraFeed({
         {!streamError ? (
           <img
             key={streamVersion}
-            src={`http://localhost:8000/video_feed?v=${streamVersion}`}
+            src={`${BACKEND_BASE}/video_feed?v=${streamVersion}`}
             alt="ORBITA Live Camera Stream"
             style={{
               width: "100%",

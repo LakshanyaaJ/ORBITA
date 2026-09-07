@@ -224,7 +224,7 @@ class Camera:
         """Push an externally generated frame into the buffer."""
         if not self._running:
             return
-        t = time.time()
+        t = time.monotonic()
         self._frame_buffer.push(frame, t)
         try:
             if self._frame_queue.full():

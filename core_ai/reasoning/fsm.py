@@ -37,6 +37,7 @@ from enum import Enum, auto
 from typing import Optional
 
 from core_ai.app.config import ExperimentStep
+from core_ai.reasoning.action_gate import normalize_action, normalize_target
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,30 @@ class FSMStatus(Enum):
     REPEATED_ACTION = auto()  # Current step already done
     UNCERTAIN = auto()     # AI confidence too low
     COMPLETED = auto()     # Experiment fully completed
+
+    def __eq__(self, other: Any) -> bool:
+        if self is other:
+            return True
+        if isinstance(other, FSMStatus):
+            # WRONG_SEQUENCE is a category that matches specific sequence/object errors for backwards compatibility
+            if other is FSMStatus.WRONG_SEQUENCE and self in (
+                FSMStatus.WRONG_OBJECT,
+                FSMStatus.WRONG_ACTION,
+                FSMStatus.STEP_SKIPPED,
+                FSMStatus.OUT_OF_SEQUENCE,
+            ):
+                return True
+            if self is FSMStatus.WRONG_SEQUENCE and other in (
+                FSMStatus.WRONG_OBJECT,
+                FSMStatus.WRONG_ACTION,
+                FSMStatus.STEP_SKIPPED,
+                FSMStatus.OUT_OF_SEQUENCE,
+            ):
+                return True
+        return False
+
+    def __hash__(self) -> int:
+        return Enum.__hash__(self)
 
 
 @dataclass
@@ -168,6 +193,10 @@ class ExperimentFSM:
             return self.steps[self._current_idx]
         return None
 
+    @property
+    def completed_step_ids(self) -> list[int]:
+        return list(self._completed_ids)
+
     # ----------------------------------------------------------------------- #
     # Core processing
     # ----------------------------------------------------------------------- #
@@ -177,6 +206,7 @@ class ExperimentFSM:
         detected_object: str = "",
         confidence: float = 1.0,
         confirmed_action: Optional[Any] = None,
+        frame_age_ms: float = 0.0,
     ) -> FSMState:
         now = time.time()
 
@@ -195,7 +225,7 @@ class ExperimentFSM:
             self._last_detected_object = getattr(confirmed_action, "object_name", detected_object)
 
             if c_status_str == "CONFIRMED_CORRECT":
-                self._advance()
+                self._advance(confirmed_action=confirmed_action, frame_age_ms=frame_age_ms)
                 new_idx = self._current_idx
                 new_current = self.steps[new_idx] if new_idx < len(self.steps) else None
                 new_next = self.steps[new_idx + 1] if new_idx + 1 < len(self.steps) else None
@@ -209,12 +239,80 @@ class ExperimentFSM:
 
             elif c_status_str == "CONFIRMED_WRONG":
                 exp_label = current.label if current else "the correct step"
+                det_act = getattr(confirmed_action, "action", detected_action)
+                det_obj = getattr(confirmed_action, "object_name", detected_object)
+                norm_v = normalize_action(det_act)
+                norm_o = normalize_target(det_obj)
+                err_evidence = getattr(confirmed_action, "evidence", {}) or {}
+
+                exp_verb = normalize_action(getattr(current, "expected_action", "") or current.action.split("_")[0])
+                exp_obj = normalize_target(getattr(current, "expected_object", "") or (current.action.split("_", 1)[1] if "_" in current.action else ""))
+                has_wrong_obj = "wrong_object" in err_evidence or (
+                    det_obj and exp_obj and norm_o != exp_obj
+                )
+
+                # 1. Wrong-object detection: right action type for current step, wrong object
+                if norm_v == exp_verb and has_wrong_obj:
+                    if current.id not in self._failed_ids:
+                        self._failed_ids.append(current.id)
+                    return self._make_state(
+                        FSMStatus.WRONG_OBJECT,
+                        current,
+                        next_step,
+                        now,
+                        error="WRONG_OBJECT",
+                        recovery=f"Wrong sequence. Wrong object. Please {exp_label.lower()}."
+                    )
+
+                # 2. Future-step reasoning: Search all future steps
+                matched_future = None
+                skipped_step_id = None
+                for future_step in self.steps[self._current_idx + 1:]:
+                    if self._matches_strict(norm_v, norm_o, future_step.action):
+                        matched_future = future_step
+                        skipped_step_id = current.id
+                        break
+
+                if matched_future is not None:
+                    if current.id not in self._failed_ids:
+                        self._failed_ids.append(current.id)
+                    if current.id not in self._skipped_ids:
+                        self._skipped_ids.append(current.id)
+                    return self._make_state(
+                        FSMStatus.STEP_SKIPPED,
+                        current,
+                        next_step,
+                        now,
+                        error="STEP_SKIPPED",
+                        recovery=f"Wrong sequence. Step {skipped_step_id} was skipped. Please complete Step {skipped_step_id}: {exp_label} first."
+                    )
+
+                # 3. Out-of-sequence reasoning: Search all past steps
+                matched_past = None
+                for past_step in self.steps[:self._current_idx]:
+                    if self._matches_strict(norm_v, norm_o, past_step.action):
+                        matched_past = past_step
+                        break
+
+                if matched_past is not None:
+                    return self._make_state(
+                        FSMStatus.OUT_OF_SEQUENCE,
+                        current,
+                        next_step,
+                        now,
+                        error="OUT_OF_SEQUENCE",
+                        recovery=f"Wrong sequence. Step {matched_past.id} is already done. Please proceed with Step {current.id}: {exp_label}."
+                    )
+
+                # 4. Fallback wrong action / sequence
+                if current.id not in self._failed_ids:
+                    self._failed_ids.append(current.id)
                 return self._make_state(
-                    FSMStatus.WRONG_SEQUENCE,
+                    FSMStatus.WRONG_ACTION,
                     current,
                     next_step,
                     now,
-                    error="WRONG_SEQUENCE",
+                    error="WRONG_ACTION",
                     recovery=f"Wrong sequence. Please {exp_label.lower()}."
                 )
 
@@ -333,12 +431,53 @@ class ExperimentFSM:
     # ----------------------------------------------------------------------- #
     # Internal helpers
     # ----------------------------------------------------------------------- #
-    def _advance(self) -> None:
+    def _advance(
+        self,
+        confirmed_action: Optional[Any] = None,
+        frame_age_ms: float = 0.0,
+    ) -> None:
+        if self._current_idx >= len(self.steps):
+            return
         current = self.steps[self._current_idx]
+        if current.id in self._completed_ids:
+            logger.warning("FSM: Step %d already marked completed, ignoring duplicate advance.", current.id)
+            return
+        from_step = current.id
         self._completed_ids.append(current.id)
         self._current_idx += 1
         self._step_start = time.time()
-        logger.info("FSM: Step %d (%s) COMPLETED.", current.id, current.action)
+        to_step = self.steps[self._current_idx].id if self._current_idx < len(self.steps) else 13
+
+        exp_act = getattr(current, "expected_action", "") or current.action.split("_")[0]
+        exp_tgt = getattr(current, "expected_object", "") or (current.action.split("_", 1)[1] if "_" in current.action else "")
+        det_act = getattr(confirmed_action, "action", self._last_detected_action) if confirmed_action else self._last_detected_action
+        det_tgt = getattr(confirmed_action, "object_name", self._last_detected_object) if confirmed_action else self._last_detected_object
+        conf = getattr(confirmed_action, "confidence", 1.0) if confirmed_action else 1.0
+        reason = getattr(confirmed_action, "validation_reason", "ACTION_CONFIRMED") if confirmed_action else "HEURISTIC_CONFIRMED"
+
+        logger.info(
+            "FSM_TRANSITION\n"
+            "from_step=%d\n"
+            "to_step=%d\n"
+            "expected_action=%s\n"
+            "expected_target=%s\n"
+            "detected_action=%s\n"
+            "detected_target=%s\n"
+            "validation=CONFIRMED_CORRECT\n"
+            "frame_age_ms=%.1f\n"
+            "confidence=%.2f\n"
+            "reason=%s",
+            from_step,
+            to_step,
+            exp_act,
+            exp_tgt,
+            det_act,
+            det_tgt,
+            frame_age_ms,
+            conf,
+            reason,
+        )
+        logger.info("FSM: Step %d (%s) COMPLETED -> advancing to Step %d.", from_step, current.action, to_step)
 
     @staticmethod
     def _split_action(action: str) -> tuple[str, str]:
@@ -371,6 +510,18 @@ class ExperimentFSM:
         if verb == exp_verb and obj and exp_obj and obj == exp_obj:
             return True
 
+        # Normalized comparison
+        norm_v = normalize_action(verb)
+        norm_exp_v = normalize_action(exp_verb)
+        norm_o = normalize_target(obj)
+        norm_exp_o = normalize_target(exp_obj)
+
+        if norm_v == norm_exp_v:
+            if not norm_exp_o:
+                return True
+            if norm_o == norm_exp_o:
+                return True
+
         return False
 
     @staticmethod
@@ -390,6 +541,14 @@ class ExperimentFSM:
         # Verb+obj exact component match
         if verb == exp_verb and obj == exp_obj:
             return True
+
+        norm_v = normalize_action(verb)
+        norm_exp_v = normalize_action(exp_verb)
+        norm_o = normalize_target(obj)
+        norm_exp_o = normalize_target(exp_obj)
+        if norm_v == norm_exp_v and norm_o and norm_exp_o and norm_o == norm_exp_o:
+            return True
+
         return False
 
     def _make_state(

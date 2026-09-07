@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core_ai.app.config import load_config, PoseConfig, HandConfig
+from core_ai.app.config import load_config, PoseConfig, HandConfig, ExperimentStep
 from core_ai.har.feature_fusion import TemporalFeatureWindow, build_feature_vector
 from core_ai.har.temporal_model import ActionClassifier, ActionPrediction
 from core_ai.interaction.hand_object import HandObjectInteractionTracker
@@ -27,7 +27,7 @@ from core_ai.perception.object_detector import ObjectDetector
 from core_ai.perception.pose_estimator import PoseEstimator
 from core_ai.reasoning.fsm import FSMStatus
 from core_ai.reasoning.state_manager import StateManager
-from core_ai.simulation.simulator import ExperimentSimulator, Scenario
+from core_ai.simulation.simulator import ExperimentSimulator, Scenario, STEP_ACTIONS
 
 
 def build_pipeline(scenario: str):
@@ -37,6 +37,23 @@ def build_pipeline(scenario: str):
     cfg.pose.backend = "mock"
     cfg.hand.backend = "pose"
     cfg.detection.use_yolo = False
+
+    # Configure canonical simulation steps to match synthetic simulator
+    cfg.experiment_steps = [
+        ExperimentStep(
+            id=i + 1,
+            action=f"{verb}_{obj}",
+            label=f"{verb} {obj}",
+            description=f"{verb} the {obj}",
+            expected_objects=[obj],
+            expected_action=verb,
+            expected_object=obj,
+            voice_prompt=f"Step {i+1}: {verb} {obj}.",
+            completion_voice=f"{obj} {verb.lower()}ed.",
+            timeout_seconds=30,
+        )
+        for i, (verb, obj) in enumerate(STEP_ACTIONS)
+    ]
 
     detector = ObjectDetector(cfg.detection)
     pose_est = PoseEstimator(cfg.pose)

@@ -148,6 +148,7 @@ class ObjectDetector:
         # Temporal smoother to eliminate jitter & brief occlusions
         self._tracked_objects: Dict[str, Dict[str, Any]] = {}
         self._frame_count: int = 0
+        self.current_ai_source: str = "PRIMARY_AI" if self._yolo is not None else "FALLBACK_AI"
 
     # ----------------------------------------------------------------------- #
     # Public API
@@ -212,12 +213,28 @@ class ObjectDetector:
             # Fallback if YOLO not available
             objects.extend(self._detect_chroma(frame, timestamp, hands=hands))
 
-        # 3. Apply temporal smoothing to stabilize bounding boxes
+        # 3. Classify AI detection source telemetry
+        has_yolo = any(getattr(o, "source", "") == "yolo" for o in objects)
+        has_chroma = any(getattr(o, "source", "") == "chroma" for o in objects)
+        if has_yolo and has_chroma:
+            self.current_ai_source = "HYBRID"
+        elif has_yolo:
+            self.current_ai_source = "PRIMARY_AI"
+        elif has_chroma:
+            self.current_ai_source = "FALLBACK_AI"
+        else:
+            self.current_ai_source = "UNCERTAIN"
+
+        # 4. Apply temporal smoothing to stabilize bounding boxes
         smoothed = self._smooth_detections(objects, timestamp)
 
-        # 4. Apply multi-object tracking: persistent track IDs, velocity vectors
+        # 5. Apply multi-object tracking: persistent track IDs, velocity vectors
         tracked = self.tracker.update(smoothed, timestamp)
         return tracked
+
+    def get_ai_source(self) -> str:
+        """Return the current AI source category: PRIMARY_AI | HYBRID | FALLBACK_AI | UNCERTAIN."""
+        return self.current_ai_source
 
     # ----------------------------------------------------------------------- #
     # YOLO detection with Semantic & Color Mapping
@@ -610,7 +627,10 @@ class ObjectDetector:
             if key not in matched_prev_keys:
                 prev = self._tracked_objects[key]
                 prev["missed_count"] += 1
-                if prev["missed_count"] > 1:
+                if prev["missed_count"] <= 1:
+                    # Bridge 1-frame flicker by preserving previous smoothed detection
+                    smoothed_results.append(prev["object"])
+                else:
                     del self._tracked_objects[key]
 
         return smoothed_results

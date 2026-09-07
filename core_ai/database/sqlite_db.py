@@ -38,6 +38,10 @@ class OrbitaDB:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def init_db(self) -> None:
+        """Initialize database schema."""
+        self._init_db()
+
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript("""

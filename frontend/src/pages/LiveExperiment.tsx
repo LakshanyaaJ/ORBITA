@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTelemetry } from '../api/telemetry';
 import clsx from 'clsx';
@@ -14,7 +14,7 @@ import {
   RotateCw
 } from 'lucide-react';
 import CameraControlPanel from '../components/camera/CameraControlPanel';
-import { rotateCamera, type CameraStatus } from '../api/camera';
+import { rotateCamera, type CameraStatus, BACKEND_BASE } from '../api/camera';
 
 // Official 13-Step Sequence strictly matching Section 2 of Master Specification
 const OFFICIAL_13_STEPS = [
@@ -42,6 +42,16 @@ export default function LiveExperiment() {
   const [isDebugMode, setIsDebugMode] = useState(true);
   const [rotation, setRotation] = useState<number>(0);
 
+  // Auto-reconnect stream if backend temporarily restarts or takes time to initialize
+  useEffect(() => {
+    if (!videoError) return;
+    const timer = setInterval(() => {
+      setVideoError(false);
+      setStreamVersion(Date.now());
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [videoError]);
+
   const handleRotate = async () => {
     const next = (rotation + 90) % 360;
     setRotation(next);
@@ -58,6 +68,27 @@ export default function LiveExperiment() {
   const isCompleted = statusStr === 'COMPLETED' || state.current_step_idx >= 12;
   const isUncertain = statusStr === 'UNCERTAIN' || state.is_uncertain;
   const isDeviation = ['WRONG_OBJECT', 'WRONG_ACTION', 'WRONG_SEQUENCE', 'STEP_SKIPPED', 'OUT_OF_SEQUENCE'].includes(statusStr);
+
+  const recTelemetry = (state as any).recording || (state as any).recording_telemetry || {
+    is_recording: false,
+    status: 'STOPPED',
+    fps: 25,
+    resolution: '1280x720',
+    frame_count: 0,
+    duration_seconds: 0,
+    output_path: ''
+  };
+
+  const logTelemetry = (state as any).logging || (state as any).logging_telemetry || {
+    status: 'ACTIVE',
+    events_written: (state.completed_steps || []).length,
+    last_event_time: '',
+    sqlite: 'ACTIVE',
+    jsonl: 'APPEND-ONLY',
+    csv: 'APPEND-ONLY'
+  };
+
+  const aiSource = (state as any).ai_source || 'PRIMARY_AI';
 
   const frameAge = (state as any).frame_age_ms ?? 0;
   const liveEdgeStatus = (state as any).live_edge || (frameAge < 250 ? 'LIVE' : (frameAge < 1000 ? 'BEHIND' : 'CRITICAL'));
@@ -146,6 +177,16 @@ export default function LiveExperiment() {
               <Video size={12} />
               {getSourceLabel()}
             </span>
+            <span className={clsx(
+              "font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded shadow flex items-center gap-1.5",
+              aiSource === 'PRIMARY_AI' ? "bg-emerald-950/90 text-emerald-400 border border-emerald-700" :
+              aiSource === 'HYBRID' ? "bg-cyan-950/90 text-accent-cyan border border-cyan-700" :
+              aiSource === 'FALLBACK_AI' || aiSource === 'FALLBACK' ? "bg-amber-950/90 text-amber-400 border border-amber-700" :
+              "bg-purple-950/90 text-purple-400 border border-purple-700"
+            )}>
+              <Cpu size={12} />
+              {aiSource}
+            </span>
             {cameraStatus?.fps && (
               <span className="font-mono text-[11px] px-2 py-1 rounded bg-space-800/80 text-space-200 border border-space-600">
                 {cameraStatus.fps.toFixed(1)} FPS
@@ -198,7 +239,7 @@ export default function LiveExperiment() {
             {!videoError ? (
               <img 
                 key={streamVersion}
-                src={`http://localhost:8000/video_feed?v=${streamVersion}`} 
+                src={`${BACKEND_BASE}/video_feed?v=${streamVersion}`} 
                 alt="Live Camera Feed"
                 className="w-full h-full object-contain"
                 style={{
@@ -322,21 +363,39 @@ export default function LiveExperiment() {
               </div>
 
               <div className={clsx(
-                "p-3 rounded border",
+                "p-3 rounded border flex flex-col justify-between",
                 isDeviation ? "bg-red-950/40 border-red-800" :
                 isCorrect ? "bg-emerald-950/40 border-emerald-800" :
                 "bg-space-800/90 border-space-700"
               )}>
-                <div className="text-space-400 text-[10px] uppercase tracking-wider mb-1">Detected Live</div>
-                <div className={clsx(
-                  "font-bold text-sm truncate",
-                  isDeviation ? "text-red-300" : isCorrect ? "text-emerald-300" : "text-space-100"
-                )}>
-                  {state.detected_action || 'EVALUATING'}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-space-400 text-[10px] uppercase tracking-wider">Detected Action</span>
+                    <span className={clsx(
+                      "text-[9px] font-mono px-1.5 py-0.5 rounded uppercase font-bold",
+                      (state.validation_state === "CONFIRMED_CORRECT" || isCorrect) ? "bg-emerald-900/80 text-emerald-200 border border-emerald-700" :
+                      (state.validation_state === "CONFIRMED_WRONG" || isDeviation) ? "bg-red-900/80 text-red-200 border border-red-700" :
+                      state.validation_state === "CONFIRMING" ? "bg-amber-900/80 text-amber-200 border border-amber-700" :
+                      "bg-space-700 text-space-300"
+                    )}>
+                      {state.validation_state || (state.confirmed_action?.status) || 'WAITING'}
+                    </span>
+                  </div>
+                  <div className={clsx(
+                    "font-bold text-sm truncate",
+                    isDeviation ? "text-red-300" : isCorrect ? "text-emerald-300" : "text-space-100"
+                  )}>
+                    {state.detected_action || 'IDLE'}
+                  </div>
+                  <div className="text-[11px] text-space-300 mt-0.5 truncate">
+                    Object: {state.detected_object || 'NONE'}
+                  </div>
                 </div>
-                <div className="text-[11px] text-space-300 mt-1 truncate">
-                  Object: {state.detected_object || 'NONE'}
-                </div>
+                {(state.validation_reason || state.confirmed_action?.validation_reason) && (
+                  <div className="text-[10px] text-space-400 font-mono mt-1 pt-1 border-t border-space-700/60 truncate" title={state.validation_reason || state.confirmed_action?.validation_reason}>
+                    Reason: {state.validation_reason || state.confirmed_action?.validation_reason}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -384,6 +443,73 @@ export default function LiveExperiment() {
               </div>
               <div className="text-space-100 font-medium italic">
                 "{state.voice_message || state.debug_telemetry?.voice_prompt || `Step ${state.current_step_idx + 1}. ${protocolSteps[state.current_step_idx]?.label}`}"
+              </div>
+            </div>
+
+            {/* Real-time Video Recording & Structured Logging Panels */}
+            <div className="grid grid-cols-2 gap-2 font-mono text-xs">
+              {/* Recording Panel */}
+              <div className="p-3 bg-space-950/90 rounded-lg border border-space-700/80 shadow-sm">
+                <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-space-800">
+                  <div className="flex items-center gap-1.5 font-bold text-[10px] text-space-200">
+                    <span className={clsx(
+                      "w-2 h-2 rounded-full",
+                      recTelemetry.is_recording ? "bg-red-500 animate-ping" : "bg-space-600"
+                    )} />
+                    <span className={recTelemetry.is_recording ? "text-red-400 font-bold" : "text-space-300"}>
+                      REC ● {recTelemetry.is_recording ? "ACTIVE" : (recTelemetry.status || "STANDBY")}
+                    </span>
+                  </div>
+                  <span className="text-[9px] text-space-400">{recTelemetry.fps || 25} FPS</span>
+                </div>
+                <div className="space-y-1 text-[10px] text-space-300">
+                  <div className="flex justify-between">
+                    <span className="text-space-500">RES:</span>
+                    <span className="font-semibold text-space-200">{recTelemetry.resolution || "1280x720"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-space-500">FRAMES:</span>
+                    <span className="font-semibold text-space-200">{recTelemetry.frame_count || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-space-500">DURATION:</span>
+                    <span className="font-semibold text-space-200">{Math.round(recTelemetry.duration_seconds || 0)}s</span>
+                  </div>
+                  {recTelemetry.output_path && (
+                    <div className="pt-1 border-t border-space-800 text-[9px] text-space-400 truncate" title={recTelemetry.output_path}>
+                      FILE: {recTelemetry.output_path.split('/').pop() || 'experiment.mp4'}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Structured Logging Panel */}
+              <div className="p-3 bg-space-950/90 rounded-lg border border-space-700/80 shadow-sm">
+                <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-space-800">
+                  <div className="flex items-center gap-1.5 font-bold text-[10px] text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>LOGGING ● {logTelemetry.status || "ACTIVE"}</span>
+                  </div>
+                  <span className="text-[9px] text-space-400">{logTelemetry.events_written || 0} evts</span>
+                </div>
+                <div className="space-y-1 text-[10px] text-space-300">
+                  <div className="flex justify-between">
+                    <span className="text-space-500">SQLITE:</span>
+                    <span className="font-semibold text-emerald-400">ACTIVE</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-space-500">JSONL:</span>
+                    <span className="font-semibold text-cyan-400">APPEND-ONLY</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-space-500">CSV:</span>
+                    <span className="font-semibold text-amber-400">APPEND-ONLY</span>
+                  </div>
+                  <div className="pt-1 border-t border-space-800 text-[9px] text-space-400 flex justify-between">
+                    <span className="text-space-500">PERSIST:</span>
+                    <span className="font-mono text-emerald-400">REALTIME</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

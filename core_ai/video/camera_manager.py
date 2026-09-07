@@ -323,7 +323,7 @@ class CameraManager:
 
     def push_sim_frame(self, frame: np.ndarray) -> None:
         """Store simulation frame in the buffer."""
-        self._sim_buffer.push(frame, time.time())
+        self._sim_buffer.push(frame, time.monotonic())
 
     def disconnect(self) -> None:
         """Disconnect active camera and return to standby."""

@@ -66,6 +66,11 @@ class ValidationResult:
         d["live_edge"] = "LIVE" if self.frame_age_ms < 250 else ("STREAM BEHIND" if self.frame_age_ms < 1500 else "CRITICAL STREAM LATENCY")
         d["is_stale"] = self.is_stale
         d["steps"] = self.steps
+        val_state = getattr(self.confirmed_action, "validation_state", self.confirmed_action.status.value) if self.confirmed_action else "WAITING"
+        val_reason = getattr(self.confirmed_action, "validation_reason", "") if self.confirmed_action else ""
+        d["validation_state"] = val_state
+        d["validation_reason"] = val_reason
+
         if self.confirmed_action:
             d["confirmed_action"] = {
                 "action": self.confirmed_action.action,
@@ -73,6 +78,8 @@ class ValidationResult:
                 "target": self.confirmed_action.target,
                 "status": self.confirmed_action.status.value,
                 "confidence": round(self.confirmed_action.confidence, 3),
+                "validation_state": val_state,
+                "validation_reason": val_reason,
             }
         
         # Section 20 SIH Development/Debug Telemetry Panel Block
@@ -90,6 +97,8 @@ class ValidationResult:
             ],
             "action": f"{self.confirmed_action.action} {self.confirmed_action.object_name}" if self.confirmed_action else (f"{self.action_prediction.action} {self.action_prediction.target_object}" if self.action_prediction else "IDLE"),
             "action_status": self.confirmed_action.status.value if self.confirmed_action else "WAITING",
+            "validation_state": val_state,
+            "validation_reason": val_reason,
             "fsm_step": f"STEP {self.fsm_state.current_step.id}: {self.fsm_state.current_step.label}" if self.fsm_state.current_step else ("COMPLETED" if self.fsm_state.is_complete else "NONE"),
             "fsm_step_number": self.fsm_state.current_step.id if self.fsm_state.current_step else (self.fsm_state.total_steps + 1 if self.fsm_state.is_complete else 0),
             "voice_prompt": self.voice_message,
@@ -171,16 +180,21 @@ class ValidationResult:
 
 
 # Mapping from HAR action verbs to experiment action verbs
-# The HAR model outputs generic verbs; this maps them to experiment vocabulary
 HAR_TO_EXPERIMENT_VERB: dict[str, str] = {
     "OPEN": "OPEN",
     "TAKE": "TAKE",
+    "PICKUP": "PICKUP",
+    "PICK_UP": "PICKUP",
     "PLACE": "PLACE",
     "TRANSFER": "TRANSFER",
+    "MOVE": "MOVE",
     "CLOSE": "CLOSE",
     "ACTIVATE": "ACTIVATE",
     "PERFORM": "PERFORM",
     "STORE": "STORE",
+    "IDENTIFY": "IDENTIFY",
+    "IDENTIFICATION": "IDENTIFY",
+    "COMPLETE": "COMPLETE",
     "IDLE": "IDLE",
 }
 
@@ -231,6 +245,7 @@ class StateManager:
         self._last_wrong_event_id: str = ""
         self._last_wrong_voice_time: float = 0.0
         self._wrong_voice_cooldown_seconds: float = 4.0
+        self._last_step_id: Optional[int] = None
 
         logger.info("StateManager initialized. Experiment: %s", self.experiment_id)
 
@@ -367,6 +382,11 @@ class StateManager:
 
         # 1. Action Confirmation Gate (with stale frame protection)
         current_step = self.fsm.current_step
+        current_step_id = getattr(current_step, "id", None) if current_step else None
+        if self._last_step_id is not None and self._last_step_id != current_step_id:
+            self.action_gate.reset_for_step(current_step)
+        self._last_step_id = current_step_id
+
         if is_stale:
             # Stale frame safeguard: do not confirm actions on delayed/stale frames
             confirmed_action = ConfirmedAction(
@@ -374,6 +394,8 @@ class StateManager:
                 object_name="",
                 status=ActionGateStatus.WAITING,
                 confidence=0.0,
+                validation_state="WAITING",
+                validation_reason="STALE_FRAME_BLOCKED",
             )
         else:
             confirmed_action = self.action_gate.evaluate(
@@ -383,16 +405,19 @@ class StateManager:
                 interactions=interactions or [],
                 har_action=prediction.action,
                 har_confidence=prediction.confidence,
+                predicted_target=getattr(prediction, "target_object", "") or detected_object,
                 fps=fps,
+                frame_age_ms=frame_age_ms,
+                is_stale=is_stale,
             )
 
-        # 2. Run FSM with confirmed action (or heuristic fallback if in WAITING without active tracks)
-        effective_confirmed = confirmed_action if (confirmed_action.status != ActionGateStatus.WAITING or bool(tracks) or bool(interactions)) else None
+        # 2. Run FSM with authoritative confirmed action
         fsm_state = self.fsm.process(
             detected_action=action_verb,
             detected_object=detected_object,
             confidence=prediction.confidence,
-            confirmed_action=effective_confirmed,
+            confirmed_action=confirmed_action,
+            frame_age_ms=frame_age_ms,
         )
 
         # 3. Synchronized Authoritative Voice Output
@@ -407,22 +432,37 @@ class StateManager:
                 self._last_spoken_step_idx = fsm_state.total_steps
         elif getattr(fsm_state, "is_transition", False):
             # Confirmed transition to next step
+            next_step = self.fsm.current_step
+            self.action_gate.reset_for_step(next_step)
+            self._last_step_id = getattr(next_step, "id", None) if next_step else None
             if self._last_spoken_step_idx != fsm_state.current_step_idx:
                 self.speak_step(fsm_state.current_step_idx)
                 self._last_spoken_step_idx = fsm_state.current_step_idx
-        elif fsm_state.status == FSMStatus.WRONG_SEQUENCE:
+        elif fsm_state.status in (
+            FSMStatus.WRONG_SEQUENCE,
+            FSMStatus.WRONG_OBJECT,
+            FSMStatus.STEP_SKIPPED,
+            FSMStatus.OUT_OF_SEQUENCE,
+            FSMStatus.WRONG_ACTION,
+        ):
             # Dynamic Section 24 wrong action guidance
             wrong_act_name = getattr(confirmed_action, "action", "")
             wrong_obj_name = getattr(confirmed_action, "object_name", "")
             wrong_full = f"{wrong_act_name} {wrong_obj_name}".strip()
             curr_id = current_step.id if current_step else -1
 
-            if current_step:
+            if fsm_state.recovery_message and fsm_state.status in (FSMStatus.STEP_SKIPPED, FSMStatus.OUT_OF_SEQUENCE):
+                recovery = fsm_state.recovery_message
+            elif current_step:
                 act = getattr(current_step, "expected_action", "")
                 if not act and hasattr(current_step, "action"):
                     act = current_step.action.split("_")[0]
                 label = current_step.label
-                if act == "PICKUP" or label.lower().startswith("pick up"):
+                if act == "IDENTIFY" or label.lower().startswith("identify"):
+                    obj_name = getattr(current_step, "expected_object", "")
+                    clean_obj = obj_name.replace("_", " ").title() if obj_name else label.replace("Identify the ", "").replace("Identify ", "")
+                    recovery = f"Wrong sequence. You're doing the wrong step. Please identify the {clean_obj}."
+                elif act == "PICKUP" or label.lower().startswith("pick up"):
                     obj_name = getattr(current_step, "expected_object", "")
                     clean_obj = obj_name.replace("_", " ").title() if obj_name else label.replace("Pick up the ", "").replace("Pick up ", "")
                     recovery = f"Wrong sequence. You're doing the wrong step. Please pick up the {clean_obj}."
@@ -526,6 +566,7 @@ class StateManager:
         self._last_wrong_track_id = None
         self._last_wrong_event_id = ""
         self._last_wrong_voice_time = 0.0
+        self._last_step_id = None
         ts = int(time.time()) % 100000
         self.experiment_id = f"{self.config.experiment_id_prefix}{ts:05d}"
         logger.info("StateManager reset. New experiment: %s", self.experiment_id)

@@ -29,6 +29,8 @@ export interface ConfirmedActionInfo {
   target?: string;
   status: string;
   confidence: number;
+  validation_state?: string;
+  validation_reason?: string;
 }
 
 export interface FSMState {
@@ -66,5 +68,7 @@ export interface ValidationResult extends FSMState {
   is_stale?: boolean;
   steps?: ExperimentStep[];
   confirmed_action?: ConfirmedActionInfo;
+  validation_state?: string;
+  validation_reason?: string;
   debug_telemetry?: DebugTelemetry;
 }

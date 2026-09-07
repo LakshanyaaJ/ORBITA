@@ -174,6 +174,7 @@ class AppState:
         self.last_result: Optional[ValidationResult] = None
         self.frame_count: int = 0
         self._fps_timer: float = time.monotonic()
+        self.readiness: dict[str, str] = {}
 
     @property
     def camera(self) -> Optional[Camera]:
@@ -287,6 +288,44 @@ async def _startup() -> None:
         output_dir=str(Path("experiments")),
         total_steps=len(cfg.experiment_steps),
     )
+
+    # Offline Standalone Model & Subsystem Readiness Checklist
+    yolo_ready = _state.detector is not None and (
+        getattr(_state.detector, "_yolo", None) is not None
+        or getattr(_state.detector, "_model", None) is not None
+        or bool(getattr(_state.detector, "active_model_path", ""))
+    )
+    har_ready = _state.classifier is not None and (_state.classifier.is_ready() or bool(getattr(_state.classifier, "active_checkpoint_path", "")))
+    mediapipe_ready = _state.pose is not None and _state.hand_tracker is not None
+    tts_ready = _state.tts is not None and _state.tts.is_available()
+    try:
+        from core_ai.database.sqlite_db import OrbitaDB
+        db = OrbitaDB()
+        db.init_db()
+        db_ready = True
+    except Exception as exc:
+        logger.error("Database readiness check failed: %s", exc)
+        db_ready = False
+    recorder_ready = _state.recorder is not None
+
+    all_ready = yolo_ready and har_ready and mediapipe_ready and tts_ready and db_ready and recorder_ready
+
+    _state.readiness = {
+        "YOLO": "READY" if yolo_ready else "NOT_READY",
+        "HAR": "READY" if har_ready else "NOT_READY",
+        "MediaPipe": "READY" if mediapipe_ready else "NOT_READY",
+        "TTS": "READY" if tts_ready else "NOT_READY",
+        "DATABASE": "READY" if db_ready else "NOT_READY",
+        "RECORDER": "READY" if recorder_ready else "NOT_READY",
+        "SYSTEM": "READY" if all_ready else "SYSTEM NOT READY",
+    }
+
+    logger.info("============================================================")
+    logger.info("ORBITA SYSTEM READINESS AUDIT (100% OFFLINE STANDALONE)")
+    logger.info("============================================================")
+    for comp, st in _state.readiness.items():
+        logger.info("  %-12s: %s", comp, st)
+    logger.info("============================================================")
 
     _state.is_running = True
 
@@ -520,6 +559,12 @@ def _execute_ai_cycle() -> None:
                     completed_steps=len(result.fsm_state.completed_step_ids),
                 )
 
+        # Auto-stop video recording upon experiment completion
+        if result and getattr(result.fsm_state, "is_complete", False):
+            if _state.recorder and _state.recorder.is_recording():
+                rec_path = _state.recorder.stop()
+                logger.info("Experiment complete! Video recording auto-finalized: %s", rec_path)
+
     ai_duration_ms = (time.time() - t0) * 1000.0
 
     # Update thread-safe annotation cache for instant streamer overlay
@@ -537,8 +582,37 @@ def _execute_ai_cycle() -> None:
     # Schedule WebSocket broadcast on FastAPI's main asyncio loop
     if result and _state._main_loop and _state._main_loop.is_running():
         try:
+            # Emit explicit STEP_VALIDATED event when FSM transitions
+            if getattr(result.fsm_state, "is_transition", False):
+                prev_step_id = result.fsm_state.completed_step_ids[-1] if result.fsm_state.completed_step_ids else result.fsm_state.current_step_idx
+                next_step_id = result.fsm_state.current_step.id if result.fsm_state.current_step else 13
+                exp_act = result.confirmed_action.action if result.confirmed_action else result.fsm_state.detected_action
+                exp_tgt = result.confirmed_action.object_name if result.confirmed_action else result.fsm_state.detected_object
+                step_evt = {
+                    "event": "STEP_VALIDATED",
+                    "step": prev_step_id,
+                    "expected_action": exp_act,
+                    "target": exp_tgt,
+                    "result": "CONFIRMED_CORRECT",
+                    "next_step": next_step_id,
+                }
+                logger.info("Emitting STEP_VALIDATED event: %s", step_evt)
+                asyncio.run_coroutine_threadsafe(
+                    _state.ws_manager.broadcast(step_evt),
+                    _state._main_loop,
+                )
+
+            # Build enriched telemetry payload
+            ws_payload = result.to_dict()
+            if _state.recorder:
+                ws_payload["recording"] = _state.recorder.get_telemetry()
+            if _state.experiment_logger:
+                ws_payload["logging"] = _state.experiment_logger.get_telemetry()
+            if _state.detector and hasattr(_state.detector, "get_ai_source"):
+                ws_payload["ai_source"] = _state.detector.get_ai_source()
+
             asyncio.run_coroutine_threadsafe(
-                _state.ws_manager.broadcast(result.to_dict()),
+                _state.ws_manager.broadcast(ws_payload),
                 _state._main_loop,
             )
         except Exception:
@@ -581,7 +655,7 @@ def _produce_single_stream_frame() -> None:
         # Camera is disconnected or connecting
         if _state.camera_manager:
             cam_stat = _state.camera_manager.get_status()
-            if cam_stat.get("status") in ("connecting", "reconnecting", "error", "disconnected"):
+            if cam_stat.get("status") in ("connecting", "reconnecting", "error", "disconnected", "waiting"):
                 _show_camera_status_frame(cam_stat.get("status", ""), cam_stat.get("error"))
         return
 
@@ -751,6 +825,10 @@ def _show_camera_status_frame(status: str, error_msg: Optional[str] = None):
         msg = "CAMERA CONNECTING..." if status == "connecting" else "RECONNECTING TO CAMERA..."
         sub = "Establishing low-latency stream..."
         col = (60, 190, 240)
+    elif status == "waiting":
+        msg = "WAITING FOR PHONE WEBCAM..."
+        sub = "Scan the QR code or open /cam on your mobile phone."
+        col = (60, 190, 240)
     elif status == "error":
         msg = "CAMERA OFFLINE"
         sub = error_msg or "Unable to reach IP camera. Auto-retrying..."
@@ -892,7 +970,43 @@ async def serve_cam_spa():
 @app.post("/api/control")
 async def control(body: dict):
     action = body.get("action", "")
+    if action in ("start", "start_experiment"):
+        if _state.state_manager:
+            _state.state_manager.reset()
+        if _state.simulator:
+            _state.simulator.reset()
+        if _state.hand_tracker:
+            _state.hand_tracker.reset()
+        if _state.interaction_tracker:
+            _state.interaction_tracker.reset()
+        if _state.feature_window:
+            _state.feature_window.reset()
+
+        exp_id = _state.state_manager.experiment_id if _state.state_manager else f"EXP_{int(time.time())}"
+        cfg = _state.config
+        if cfg:
+            _state.experiment_logger = ExperimentLogger(
+                experiment_id=exp_id,
+                experiment_name=cfg.experiment_name,
+                output_dir=str(Path("experiments")),
+                total_steps=len(cfg.experiment_steps),
+            )
+        rec_path = ""
+        if _state.recorder:
+            rec_path = _state.recorder.start(experiment_id=exp_id)
+        return {"status": "started", "experiment_id": exp_id, "recording_path": rec_path}
+
+    if action in ("stop", "stop_experiment"):
+        rec_path = ""
+        if _state.recorder and _state.recorder.is_recording():
+            rec_path = _state.recorder.stop()
+        if _state.experiment_logger:
+            _state.experiment_logger.export()
+        return {"status": "stopped", "recording_path": rec_path}
+
     if action == "reset":
+        if _state.recorder and _state.recorder.is_recording():
+            _state.recorder.stop()
         if _state.state_manager:
             _state.state_manager.reset()
         if _state.simulator:
@@ -1118,6 +1232,9 @@ async def api_status():
 
     return {
         "ai_engine": "ONLINE",
+        "system_status": "READY" if _state.readiness.get("SYSTEM") == "READY" else "INITIALIZING",
+        "readiness": _state.readiness,
+        "ai_source": _state.detector.get_ai_source() if (_state.detector and hasattr(_state.detector, "get_ai_source")) else "PRIMARY_AI",
         "camera": "ONLINE" if is_cam_online else "OFFLINE",
         "camera_source": cam_info.get("source", _state.mode),
         "camera_status": cam_info.get("status", "disconnected"),
@@ -1131,6 +1248,8 @@ async def api_status():
         "dropped_frames_pct": cam_diag.get("dropped_pct", 0.0),
         "tts": "ONLINE" if (_state.tts and _state.tts.is_available()) else "OFFLINE",
         "recording": "ON" if (_state.recorder and _state.recorder.is_recording()) else "OFF",
+        "recording_telemetry": _state.recorder.get_telemetry() if _state.recorder else {"is_recording": False, "status": "STOPPED"},
+        "logging_telemetry": _state.experiment_logger.get_telemetry() if _state.experiment_logger else {"status": "IDLE", "events_written": 0},
         "stream": "ON",
         "storage": "OK",
         "mode": _state.mode,

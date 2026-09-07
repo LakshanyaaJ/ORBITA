@@ -43,20 +43,22 @@ if %ERRORLEVEL% neq 0 (
 )
 
 :: Free ports if any lingering zombie processes exist
-echo [*] Freeing ports 8000 and 5173/5174...
-powershell -NoProfile -Command "$ports = @(8000, 8443, 5173, 5174); $pids = (Get-NetTCPConnection -LocalPort $ports -State Listen -ErrorAction SilentlyContinue).OwningProcess; if ($pids) { Get-Process -Id $pids -ErrorAction SilentlyContinue | Stop-Process -Force }" 2>nul
+echo [*] Freeing ports 8000, 8443, and 5173/5174...
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000,8443,5173,5174 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" 2>nul
 
 echo [*] Starting ORBITA Backend (FastAPI on Port 8000)...
 start "ORBITA - Backend" cmd /k "title ORBITA - Backend && cd /d "%ROOT_DIR%" && "%PYTHON_CMD%" main.py --mode web --scenario A"
 
-:: Brief delay to allow backend to initialize socket
-ping 127.0.0.1 -n 3 >nul
+:: Wait dynamically for backend to finish loading models and open port 8000
+echo [*] Waiting for Backend models to load and port 8000 to be ready...
+powershell -NoProfile -Command "for ($i=0; $i -lt 30; $i++) { try { $client = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 8000); if ($client.Connected) { $client.Close(); exit 0 } } catch {}; Start-Sleep -Seconds 1 }; exit 0"
 
 echo [*] Starting ORBITA Frontend (Vite on Port 5173)...
 start "ORBITA - Frontend" cmd /k "title ORBITA - Frontend && cd /d "%ROOT_DIR%frontend" && npm run dev"
 
-:: Brief delay for Vite to begin listening
-ping 127.0.0.1 -n 4 >nul
+:: Wait dynamically for Vite to open port 5173
+echo [*] Waiting for Frontend server on port 5173...
+powershell -NoProfile -Command "for ($i=0; $i -lt 15; $i++) { try { $client = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 5173); if ($client.Connected) { $client.Close(); exit 0 } } catch {}; Start-Sleep -Seconds 1 }; exit 0"
 
 echo.
 echo =====================================================================

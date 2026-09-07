@@ -45,8 +45,9 @@ class LatestFrameBuffer:
     Multiple consumers can read the latest frame independently.
     """
 
-    def __init__(self, name: str = "orbita-buffer"):
+    def __init__(self, name: str = "orbita-buffer", maxsize: int = 1):
         self.name = name
+        self.maxsize = maxsize
         self._lock = threading.Lock()
         self._new_frame_event = threading.Event()
         
@@ -60,6 +61,10 @@ class LatestFrameBuffer:
         self._fps_counter: int = 0
         self._fps_timer: float = time.monotonic()
         self._last_push_time: float = 0.0
+
+    def put(self, frame: np.ndarray, timestamp: Optional[float] = None, source_timestamp: float = 0.0) -> int:
+        """Alias for push for queue-like compatibility."""
+        return self.push(frame, timestamp=timestamp, source_timestamp=source_timestamp)
 
     def push(
         self,

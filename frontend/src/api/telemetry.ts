@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import type { ValidationResult } from './types';
 
-// The default backend port is 8000
-const WS_URL = 'ws://localhost:8000/ws/telemetry';
+const WS_URL = typeof window !== 'undefined' && window.location.hostname
+  ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:8000/ws/telemetry`
+  : 'ws://localhost:8000/ws/telemetry';
 
 export function useTelemetry() {
   const [data, setData] = useState<ValidationResult | null>(null);
