@@ -20,6 +20,7 @@ from typing import Callable, Optional
 
 from core_ai.app.config import ExperimentStep, OrbitaConfig
 from core_ai.har.temporal_model import ActionPrediction
+from core_ai.reasoning.action_gate import ActionConfirmationGate, ActionGateStatus, ConfirmedAction
 from core_ai.reasoning.fsm import ExperimentFSM, FSMState, FSMStatus
 from core_ai.reasoning.rules import RuleMatch, RuleResult, evaluate_rules
 from core_ai.perception.object_detector import DetectedObject
@@ -42,14 +43,54 @@ class ValidationResult:
     left_hand: Any = None
     right_hand: Any = None
     interactions: list[Any] = field(default_factory=list)
+    confirmed_action: Optional[ConfirmedAction] = None
+    voice_status: str = "IDLE"
+    steps: list[dict] = field(default_factory=list)
+    camera_source: str = "UNKNOWN"
+    frame_index: int = 0
+    total_frames: int = 0
+    video_time: str = "00:00.00"
+    tracks: list[Any] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = self.fsm_state.to_dict()
         d["voice_message"] = self.voice_message
+        d["voice_status"] = self.voice_status
         d["hud_message"] = self.hud_message
         d["alert_level"] = self.alert_level
         d["fps"] = round(self.fps, 1)
         d["latency_ms"] = round(self.latency_ms, 2)
+        d["steps"] = self.steps
+        if self.confirmed_action:
+            d["confirmed_action"] = {
+                "action": self.confirmed_action.action,
+                "object": self.confirmed_action.object_name,
+                "target": self.confirmed_action.target,
+                "status": self.confirmed_action.status.value,
+                "confidence": round(self.confirmed_action.confidence, 3),
+            }
+        
+        # Section 20 SIH Development/Debug Telemetry Panel Block
+        d["debug_telemetry"] = {
+            "source": self.camera_source,
+            "frame": self.frame_index,
+            "total_frames": self.total_frames,
+            "video_time": self.video_time,
+            "yolo_detections": [
+                f"{o.class_name} {o.confidence:.2f}" for o in self.detected_objects if getattr(o, "source", "") == "yolo"
+            ],
+            "tracks": [
+                f"ID {getattr(t, 'track_id', '?')} — {getattr(t, 'identity', getattr(t, 'class_name', ''))} — {getattr(getattr(t, 'state', None), 'value', getattr(t, 'state', 'ON_TABLE'))}"
+                for t in self.tracks
+            ],
+            "action": f"{self.confirmed_action.action} {self.confirmed_action.object_name}" if self.confirmed_action else (f"{self.action_prediction.action} {self.action_prediction.target_object}" if self.action_prediction else "IDLE"),
+            "action_status": self.confirmed_action.status.value if self.confirmed_action else "WAITING",
+            "fsm_step": f"STEP {self.fsm_state.current_step.id}: {self.fsm_state.current_step.label}" if self.fsm_state.current_step else ("COMPLETED" if self.fsm_state.is_complete else "NONE"),
+            "fsm_step_number": self.fsm_state.current_step.id if self.fsm_state.current_step else (self.fsm_state.total_steps + 1 if self.fsm_state.is_complete else 0),
+            "voice_prompt": self.voice_message,
+            "voice_status": self.voice_status,
+        }
+
         d["rules"] = [
             {"id": r.rule_id, "result": r.result.name, "message": r.message}
             for r in self.rule_matches
@@ -161,20 +202,127 @@ class StateManager:
         ts = int(time.time()) % 100000
         self.experiment_id = experiment_id or f"{config.experiment_id_prefix}{ts:05d}"
 
-        # Initialize FSM
+        # Initialize FSM and Action Confirmation Gate
         self.fsm = ExperimentFSM(
             steps=config.experiment_steps,
             experiment_id=self.experiment_id,
             confidence_threshold=config.har.action_confidence_min,
             confirmation_frames_required=3,
         )
+        self.action_gate = ActionConfirmationGate()
 
+        # Robust Voice Latch & Section 25 Correction Latch
+        self._last_spoken_step_idx: Optional[int] = None
         self._last_voice_message: str = ""
         self._last_status: FSMStatus = FSMStatus.WAITING
-        self._voice_debounce_seconds: float = 3.0
         self._last_voice_time: float = 0.0
+        self._voice_active_until: float = 0.0
+        self._voice_status: str = "IDLE"
+        self._voice_events: List[Dict[str, Any]] = []
+        self._voice_event_counter: int = 0
+        self._last_wrong_action: str = ""
+        self._last_wrong_step: int = -1
+        self._last_wrong_track_id: Optional[int] = None
+        self._last_wrong_event_id: str = ""
+        self._last_wrong_voice_time: float = 0.0
+        self._wrong_voice_cooldown_seconds: float = 4.0
 
         logger.info("StateManager initialized. Experiment: %s", self.experiment_id)
+
+    @property
+    def voice_status(self) -> str:
+        return "PLAYING" if time.time() < self._voice_active_until else "IDLE"
+
+    @property
+    def voice_events(self) -> List[Dict[str, Any]]:
+        return self._voice_events
+
+    def speak_step(self, step_idx: int) -> None:
+        """Speaks the exact instruction for step_idx once."""
+        if 0 <= step_idx < len(self.config.experiment_steps):
+            step = self.config.experiment_steps[step_idx]
+            text = step.voice_prompt
+            self._execute_voice(text, step_id=step.id, voice_type="STEP_PROMPT")
+
+    def speak_wrong_sequence(
+        self,
+        message: str,
+        wrong_action: str = "",
+        current_step_id: int = -1,
+        is_new_event: bool = True,
+        wrong_event_id: str = "",
+        track_id: Optional[int] = None,
+    ) -> None:
+        """Speaks wrong sequence error message strictly when a NEW wrong action event is confirmed."""
+        now = time.time()
+        if not message.startswith("Wrong sequence"):
+            message = f"Wrong sequence. {message}"
+
+        # Section 8, 9, 10 & 11: Event Deduplication is PRIMARY
+        # Do not speak for ongoing frames of the same wrong action event
+        if not is_new_event:
+            return
+
+        # Secondary Cooldown Guard
+        if (
+            current_step_id == self._last_wrong_step
+            and wrong_action == self._last_wrong_action
+            and (now - self._last_wrong_voice_time) < self._wrong_voice_cooldown_seconds
+        ):
+            return
+
+        self._last_wrong_action = wrong_action
+        self._last_wrong_step = current_step_id
+        self._last_wrong_track_id = track_id
+        self._last_wrong_event_id = wrong_event_id
+        self._last_wrong_voice_time = now
+
+        self._execute_voice(
+            message,
+            step_id=-1,
+            voice_type="WRONG_ACTION",
+            custom_event_id=wrong_event_id or None,
+            is_error=True,
+        )
+
+    def speak_complete(self) -> None:
+        """Speaks final experiment completion message once."""
+        text = "Experiment complete. All steps were successfully completed."
+        self._execute_voice(text, step_id=13, voice_type="COMPLETION")
+
+    def _execute_voice(
+        self,
+        text: str,
+        step_id: int = 0,
+        voice_type: str = "STEP_PROMPT",
+        custom_event_id: Optional[str] = None,
+        is_error: bool = False,
+    ) -> None:
+        now = time.time()
+        self.on_voice(text)
+        self._last_voice_message = text
+        self._last_voice_time = now
+
+        words = len(text.split())
+        est_duration = max(1.8, words * 0.42)
+        self._voice_active_until = now + est_duration
+
+        self._voice_event_counter += 1
+        event_id = custom_event_id or f"VOICE_EVENT_{self._voice_event_counter:03d}"
+
+        event = {
+            "voice_event_id": event_id,
+            "type": voice_type,
+            "step": step_id,
+            "text": text,
+            "timestamp": now,
+            "source": "state_manager",
+            "status": "PLAYING",
+            "formatted_time": time.strftime("%H:%M:%S", time.localtime(now)),
+        }
+        self._voice_events.append(event)
+        logger.info("VOICE EVENT %s: type=%s step=%d text=\"%s\" timestamp=%.2f",
+                    event_id, voice_type, step_id, text, now)
 
     # ----------------------------------------------------------------------- #
     # Main process method
@@ -188,22 +336,19 @@ class StateManager:
         left_hand: Any = None,
         right_hand: Any = None,
         interactions: Optional[list[Any]] = None,
+        tracks: Optional[list[Any]] = None,
+        camera_source: str = "UNKNOWN",
+        frame_index: int = 0,
+        total_frames: int = 0,
+        video_time: str = "00:00.00",
     ) -> ValidationResult:
         """
-        Process one action prediction and return complete validation result.
-
-        Args:
-            prediction: HAR action prediction
-            detected_objects: Current frame's detected objects
-            fps: Current processing frame rate
-            latency_ms: Current end-to-end latency
-            left_hand: Tracked left hand state
-            right_hand: Tracked right hand state
-            interactions: List of active hand-object interactions
-
-        Returns:
-            ValidationResult
+        Process perception & interaction evidence through ActionConfirmationGate and FSM.
+        Voice guidance is strictly driven by confirmed FSM step transitions.
         """
+        now = time.time()
+        curr_voice_stat = self.voice_status
+
         # Map HAR action to experiment action + object
         action_verb = HAR_TO_EXPERIMENT_VERB.get(prediction.action.upper(), "IDLE")
         detected_object = (
@@ -212,14 +357,86 @@ class StateManager:
             else self._resolve_object(prediction, detected_objects, interactions)
         )
 
-        # Run FSM
+        # 1. Action Confirmation Gate
+        current_step = self.fsm.current_step
+        confirmed_action = self.action_gate.evaluate(
+            current_step=current_step,
+            detected_objects=detected_objects,
+            tracks=tracks or [],
+            interactions=interactions or [],
+            har_action=prediction.action,
+            har_confidence=prediction.confidence,
+            fps=fps,
+        )
+
+        # 2. Run FSM with confirmed action (or heuristic fallback if in WAITING without active tracks)
+        effective_confirmed = confirmed_action if (confirmed_action.status != ActionGateStatus.WAITING or bool(tracks) or bool(interactions)) else None
         fsm_state = self.fsm.process(
             detected_action=action_verb,
             detected_object=detected_object,
             confidence=prediction.confidence,
+            confirmed_action=effective_confirmed,
         )
 
-        # Run rule engine (supplementary checks)
+        # 3. Synchronized Authoritative Voice Output
+        if self._last_spoken_step_idx is None and fsm_state.current_step_idx == 0 and not fsm_state.is_complete:
+            # Announce Step 1 on experiment start
+            self.speak_step(0)
+            self._last_spoken_step_idx = 0
+        elif fsm_state.is_complete:
+            # Terminal state: announce completion exactly once
+            if self._last_spoken_step_idx != fsm_state.total_steps:
+                self.speak_complete()
+                self._last_spoken_step_idx = fsm_state.total_steps
+        elif getattr(fsm_state, "is_transition", False):
+            # Confirmed transition to next step
+            if self._last_spoken_step_idx != fsm_state.current_step_idx:
+                self.speak_step(fsm_state.current_step_idx)
+                self._last_spoken_step_idx = fsm_state.current_step_idx
+        elif fsm_state.status == FSMStatus.WRONG_SEQUENCE:
+            # Dynamic Section 24 wrong action guidance
+            wrong_act_name = getattr(confirmed_action, "action", "")
+            wrong_obj_name = getattr(confirmed_action, "object_name", "")
+            wrong_full = f"{wrong_act_name} {wrong_obj_name}".strip()
+            curr_id = current_step.id if current_step else -1
+
+            if current_step:
+                act = getattr(current_step, "expected_action", "")
+                if not act and hasattr(current_step, "action"):
+                    act = current_step.action.split("_")[0]
+                label = current_step.label
+                if act == "PICKUP" or label.lower().startswith("pick up"):
+                    obj_name = getattr(current_step, "expected_object", "")
+                    clean_obj = obj_name.replace("_", " ").title() if obj_name else label.replace("Pick up the ", "").replace("Pick up ", "")
+                    recovery = f"Wrong sequence. You're doing the wrong step. Please pick up the {clean_obj}."
+                elif label.lower().startswith("place"):
+                    recovery = f"Wrong sequence. Please {label[0].lower() + label[1:]}."
+                elif label.lower().startswith("move"):
+                    from_l = getattr(current_step, "from_location", "")
+                    to_l = getattr(current_step, "to_location", "")
+                    if from_l and to_l:
+                        obj_n = getattr(current_step, "expected_object", "").replace("_", " ").title()
+                        f_name = from_l.replace("_", " ").title()
+                        t_name = to_l.replace("_", " ").title()
+                        recovery = f"Wrong sequence. Please move the {obj_n} from {f_name} to {t_name}."
+                    else:
+                        recovery = f"Wrong sequence. Please {label[0].lower() + label[1:]}."
+                else:
+                    recovery = f"Wrong sequence. Please {label[0].lower() + label[1:]}."
+            is_new = getattr(confirmed_action, "is_new_event", True) if confirmed_action else True
+            event_id = getattr(confirmed_action, "event_id", "") if confirmed_action else ""
+            trk_id = getattr(confirmed_action, "track_id", None) if confirmed_action else None
+
+            self.speak_wrong_sequence(
+                recovery,
+                wrong_action=wrong_full,
+                current_step_id=curr_id,
+                is_new_event=is_new,
+                wrong_event_id=event_id,
+                track_id=trk_id,
+            )
+
+        # Run rule engine for telemetry
         rule_matches: list[RuleMatch] = []
         if fsm_state.current_step is not None and not prediction.is_uncertain:
             rule_matches = evaluate_rules(
@@ -233,13 +450,24 @@ class StateManager:
                 confidence_threshold=self.config.har.action_confidence_min,
             )
 
-        # Generate messages
-        voice_msg, hud_msg, alert_level = self._generate_messages(
+        # Generate HUD and voice text snapshot
+        voice_msg = self._last_voice_message or (fsm_state.current_step.voice_prompt if fsm_state.current_step else "Ready.")
+        _, hud_msg, alert_level = self._generate_messages(
             fsm_state, rule_matches, prediction
         )
 
-        # Trigger voice (with debounce)
-        self._maybe_speak(voice_msg, fsm_state.status)
+        steps_list = [
+            {
+                "id": s.id,
+                "action": s.action,
+                "label": s.label,
+                "description": s.description,
+                "expected_action": getattr(s, "expected_action", ""),
+                "expected_object": getattr(s, "expected_object", ""),
+                "expected_target": getattr(s, "expected_target", ""),
+            }
+            for s in self.config.experiment_steps
+        ]
 
         return ValidationResult(
             fsm_state=fsm_state,
@@ -254,16 +482,37 @@ class StateManager:
             left_hand=left_hand,
             right_hand=right_hand,
             interactions=interactions or [],
+            confirmed_action=confirmed_action,
+            voice_status=curr_voice_stat,
+            steps=steps_list,
+            camera_source=camera_source,
+            frame_index=frame_index,
+            total_frames=total_frames,
+            video_time=video_time,
+            tracks=tracks or [],
         )
 
     def reset(self) -> None:
         """Reset experiment to step 1."""
         self.fsm.reset()
+        self.action_gate.reset()
+        self._last_spoken_step_idx = None
         self._last_voice_message = ""
         self._last_status = FSMStatus.WAITING
+        self._voice_status = "IDLE"
+        self._voice_events.clear()
+        self._voice_event_counter = 0
+        self._last_wrong_action = ""
+        self._last_wrong_step = -1
+        self._last_wrong_track_id = None
+        self._last_wrong_event_id = ""
+        self._last_wrong_voice_time = 0.0
         ts = int(time.time()) % 100000
         self.experiment_id = f"{self.config.experiment_id_prefix}{ts:05d}"
         logger.info("StateManager reset. New experiment: %s", self.experiment_id)
+        # Speak Step 1 prompt
+        self.speak_step(0)
+        self._last_spoken_step_idx = 0
 
     def get_current_state(self) -> FSMState:
         return self.fsm.get_current_state()

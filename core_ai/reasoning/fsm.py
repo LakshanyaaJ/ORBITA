@@ -46,6 +46,7 @@ class FSMStatus(Enum):
     CORRECT = auto()       # Current action matches expected step
     WRONG_OBJECT = auto()  # Right action type, wrong object
     WRONG_ACTION = auto()  # Completely wrong action
+    WRONG_SEQUENCE = auto() # Confirmed out-of-order action
     STEP_SKIPPED = auto()  # Action matches a future step (gap)
     OUT_OF_SEQUENCE = auto()  # Action matches an already-completed step
     REPEATED_ACTION = auto()  # Current step already done
@@ -72,6 +73,7 @@ class FSMState:
     start_time: float
     elapsed_seconds: float
     step_start_time: float
+    is_transition: bool = False
 
     @property
     def is_complete(self) -> bool:
@@ -89,6 +91,7 @@ class FSMState:
             "current_step_idx": self.current_step_idx,
             "total_steps": self.total_steps,
             "status": self.status.name,
+            "is_transition": self.is_transition,
             "current_step": {
                 "id": self.current_step.id,
                 "action": self.current_step.action,
@@ -170,12 +173,11 @@ class ExperimentFSM:
     # ----------------------------------------------------------------------- #
     def process(
         self,
-        detected_action: str,
+        detected_action: str = "IDLE",
         detected_object: str = "",
         confidence: float = 1.0,
+        confirmed_action: Optional[Any] = None,
     ) -> FSMState:
-        self._last_detected_action = detected_action
-        self._last_detected_object = detected_object
         now = time.time()
 
         # --- Terminal state ---
@@ -185,6 +187,45 @@ class ExperimentFSM:
         current = self.steps[self._current_idx]
         next_step = self.steps[self._current_idx + 1] if self._current_idx + 1 < len(self.steps) else None
 
+        # 1. Authoritative Action Confirmation Gate Evaluation
+        if confirmed_action is not None:
+            c_status = getattr(confirmed_action, "status", None)
+            c_status_str = getattr(c_status, "name", str(c_status))
+            self._last_detected_action = getattr(confirmed_action, "action", detected_action)
+            self._last_detected_object = getattr(confirmed_action, "object_name", detected_object)
+
+            if c_status_str == "CONFIRMED_CORRECT":
+                self._advance()
+                new_idx = self._current_idx
+                new_current = self.steps[new_idx] if new_idx < len(self.steps) else None
+                new_next = self.steps[new_idx + 1] if new_idx + 1 < len(self.steps) else None
+                if new_current is None or new_idx >= len(self.steps) or getattr(new_current, "action", "") == "EXPERIMENT_COMPLETE":
+                    st = self._make_state(FSMStatus.COMPLETED, new_current, None, now)
+                    st.is_transition = True
+                    return st
+                st = self._make_state(FSMStatus.CORRECT, new_current, new_next, now)
+                st.is_transition = True
+                return st
+
+            elif c_status_str == "CONFIRMED_WRONG":
+                exp_label = current.label if current else "the correct step"
+                return self._make_state(
+                    FSMStatus.WRONG_SEQUENCE,
+                    current,
+                    next_step,
+                    now,
+                    error="WRONG_SEQUENCE",
+                    recovery=f"Wrong sequence. Please {exp_label.lower()}."
+                )
+
+            else:
+                # WAITING (Noise or partial interaction - never treat as error)
+                return self._make_state(FSMStatus.WAITING, current, next_step, now)
+
+        self._last_detected_action = detected_action
+        self._last_detected_object = detected_object
+
+        # --- Fallback Heuristic Match (for tests without ActionConfirmationGate) ---
         # --- UNCERTAIN ---
         if confidence < self.confidence_threshold:
             self._consecutive_matches = 0
@@ -214,9 +255,13 @@ class ExperimentFSM:
                 new_idx = self._current_idx
                 new_current = self.steps[new_idx] if new_idx < len(self.steps) else None
                 new_next = self.steps[new_idx + 1] if new_idx + 1 < len(self.steps) else None
-                if new_current is None:
-                    return self._make_state(FSMStatus.COMPLETED, None, None, now)
-                return self._make_state(FSMStatus.CORRECT, current, next_step, now)
+                if new_current is None or new_idx >= len(self.steps) or getattr(new_current, "action", "") == "EXPERIMENT_COMPLETE":
+                    st = self._make_state(FSMStatus.COMPLETED, new_current, None, now)
+                    st.is_transition = True
+                    return st
+                st = self._make_state(FSMStatus.CORRECT, current, next_step, now)
+                st.is_transition = True
+                return st
             else:
                 return self._make_state(FSMStatus.WAITING, current, next_step, now,
                                         recovery=f"Action recognized, confirming ({self._consecutive_matches}/{self.confirmation_frames_required})...")

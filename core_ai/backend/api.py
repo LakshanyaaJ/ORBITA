@@ -398,14 +398,19 @@ def _execute_ai_cycle() -> None:
             target_object=obj,
         )
 
-    elif _state.camera_manager and active_source in ("jetson_camera", "ip_camera", "phone_webcam"):
+    elif _state.camera_manager and active_source in ("jetson_camera", "ip_camera", "phone_webcam", "video_file"):
         frame_buf = _state.camera_manager.get_frame_buffer()
         frame, cap_ts, _ = frame_buf.get_latest()
         if frame is None:
             return
 
         latency_ms = max(0.0, (time.time() - cap_ts) * 1000.0)
-        cam_name = "Phone Camera" if active_source in ("ip_camera", "phone_webcam") else "Jetson Camera"
+        if active_source == "video_file":
+            cam_name = "Demo MP4"
+        elif active_source in ("ip_camera", "phone_webcam"):
+            cam_name = "Phone Camera"
+        else:
+            cam_name = "Jetson Camera"
         t_stamp = time.time()
 
         # Perception: run pose & hand tracking first so detector has hand context
@@ -415,6 +420,12 @@ def _execute_ai_cycle() -> None:
         left, right = _state.hand_tracker.track(pose, frame, t_stamp, person_bbox=person_bbox) if _state.hand_tracker else (None, None)
         objects = _state.detector.detect(frame, t_stamp, hands=(left, right)) if _state.detector else []
         interactions = _state.interaction_tracker.update(left, right, objects, t_stamp) if _state.interaction_tracker else []
+
+        # Update physical track states with hand interactions
+        tracks = []
+        if _state.detector and hasattr(_state.detector, "tracker") and _state.detector.tracker:
+            _state.detector.tracker.update_interaction_states(interactions, dt=1.0 / max(1.0, _state.ai_fps))
+            tracks = _state.detector.tracker.get_active_tracks()
 
         # Feature fusion & HAR
         fv = build_feature_vector(pose, left, right, objects, interactions, frame.shape[:2])
@@ -432,6 +443,32 @@ def _execute_ai_cycle() -> None:
     else:
         return
 
+    # Extract source telemetry metadata
+    frame_idx = 0
+    total_frames = 0
+    video_time_str = "00:00.00"
+    cam_source_tag = "UNKNOWN"
+    if active_source == "video_file" and _state.camera_manager and _state.camera_manager._jetson_camera:
+        cam = _state.camera_manager._jetson_camera
+        frame_idx = getattr(cam, "frame_index", 0)
+        total_frames = getattr(cam, "total_video_frames", 0)
+        fps_val = getattr(cam, "actual_fps", 30.0) or 30.0
+        secs = frame_idx / max(1.0, fps_val)
+        video_time_str = f"{int(secs // 60):02d}:{secs % 60:05.2f}"
+        cam_source_tag = "MP4"
+    elif active_source == "ip_camera":
+        cam_source_tag = "IP CAMERA"
+        video_time_str = time.strftime("%M:%S", time.localtime(cap_ts if 'cap_ts' in locals() else time.time()))
+    elif active_source == "phone_webcam":
+        cam_source_tag = "PHONE"
+        video_time_str = time.strftime("%M:%S", time.localtime(cap_ts if 'cap_ts' in locals() else time.time()))
+    elif active_source == "jetson_camera":
+        cam_source_tag = "JETSON / USB"
+        video_time_str = time.strftime("%M:%S", time.localtime(cap_ts if 'cap_ts' in locals() else time.time()))
+    elif active_source == "sim":
+        cam_source_tag = "SIMULATOR"
+        video_time_str = "00:00.00"
+
     # Reasoning / State Manager
     result = None
     if _state.state_manager:
@@ -444,6 +481,11 @@ def _execute_ai_cycle() -> None:
             left_hand=left,
             right_hand=right,
             interactions=interactions if active_source != "sim" else [],
+            tracks=tracks if 'tracks' in locals() else [],
+            camera_source=cam_source_tag,
+            frame_index=frame_idx,
+            total_frames=total_frames,
+            video_time=video_time_str,
         )
         _state.last_result = result
 
@@ -940,6 +982,15 @@ async def camera_connect(body: dict):
             "source": "phone_webcam",
             "pairing": _state.camera_manager.phone_receiver.get_connection_info(),
         }
+
+    elif source == "video_file":
+        video_path = body.get("path") or body.get("url") or "vdata/20260905_145858.mp4"
+        loop = bool(body.get("loop", False))
+        success, err = _state.camera_manager.connect_video_file(video_path, loop=loop)
+        if not success:
+            return JSONResponse(status_code=400, content={"status": "error", "error": err})
+        _state.mode = "video_file"
+        return {"status": "connected", "source": "video_file", "path": video_path}
 
     elif source == "sim":
         _state.camera_manager.set_simulation_mode()

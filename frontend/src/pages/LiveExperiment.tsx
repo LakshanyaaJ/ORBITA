@@ -16,16 +16,21 @@ import {
 import CameraControlPanel from '../components/camera/CameraControlPanel';
 import { rotateCamera, type CameraStatus } from '../api/camera';
 
-// Standard experiment protocol steps for full timeline rendering
-const DEFAULT_PROTOCOL_STEPS = [
-  { id: 1, action: "OPEN_MAIN_BOX", label: "Open Main Box", expected_object: "MAIN_BOX" },
-  { id: 2, action: "TAKE_RED_BOX", label: "Take Red Box", expected_object: "RED_BOX" },
-  { id: 3, action: "TAKE_YELLOW_BOX", label: "Take Yellow Box", expected_object: "YELLOW_BOX" },
-  { id: 4, action: "OPEN_RED_BOX", label: "Open Red Box", expected_object: "RED_BOX" },
-  { id: 5, action: "TAKE_SAMPLE", label: "Take Sample", expected_object: "SAMPLE" },
-  { id: 6, action: "PERFORM_EXPERIMENT", label: "Perform Experiment", expected_object: "SAMPLE" },
-  { id: 7, action: "CLOSE_BOX", label: "Close Box", expected_object: "MAIN_BOX" },
-  { id: 8, action: "STORE_COMPONENTS", label: "Store Components", expected_object: "MAIN_BOX" }
+// Official 13-Step Sequence strictly matching Section 2 of Master Specification
+const OFFICIAL_13_STEPS = [
+  { id: 1, action: "IDENTIFY_BLUE_BOX", label: "Identify the Blue Box", expected_object: "BLUE_BOX" },
+  { id: 2, action: "PICKUP_BLUE_BOX", label: "Pick up the Blue Box", expected_object: "BLUE_BOX" },
+  { id: 3, action: "PLACE_BLUE_BOX_A", label: "Place Blue Box at Location A", expected_object: "BLUE_BOX" },
+  { id: 4, action: "IDENTIFY_YELLOW_BOX", label: "Identify the Yellow Box", expected_object: "YELLOW_BOX" },
+  { id: 5, action: "PICKUP_YELLOW_BOX", label: "Pick up the Yellow Box", expected_object: "YELLOW_BOX" },
+  { id: 6, action: "PLACE_YELLOW_BOX_B", label: "Place Yellow Box at Location B", expected_object: "YELLOW_BOX" },
+  { id: 7, action: "PICKUP_PEN", label: "Pick up the Pen", expected_object: "PEN" },
+  { id: 8, action: "PLACE_PEN_BLUE_BOX", label: "Place Pen inside the Blue Box", expected_object: "PEN" },
+  { id: 9, action: "PICKUP_WATCH", label: "Pick up the Watch", expected_object: "WATCH" },
+  { id: 10, action: "PLACE_WATCH_YELLOW_BOX", label: "Place Watch inside the Yellow Box", expected_object: "WATCH" },
+  { id: 11, action: "MOVE_BLUE_BOX_A_TO_B", label: "Move Blue Box from A to B", expected_object: "BLUE_BOX" },
+  { id: 12, action: "MOVE_YELLOW_BOX_B_TO_A", label: "Move Yellow Box from B to A", expected_object: "YELLOW_BOX" },
+  { id: 13, action: "EXPERIMENT_COMPLETE", label: "Experiment Complete", expected_object: "ALL" },
 ];
 
 export default function LiveExperiment() {
@@ -34,7 +39,7 @@ export default function LiveExperiment() {
   const [videoError, setVideoError] = useState(false);
   const [streamVersion, setStreamVersion] = useState(Date.now());
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
-  const [isDebugMode, setIsDebugMode] = useState(false);
+  const [isDebugMode, setIsDebugMode] = useState(true);
   const [rotation, setRotation] = useState<number>(0);
 
   const handleRotate = async () => {
@@ -45,13 +50,14 @@ export default function LiveExperiment() {
   };
 
   const state = data || getFallbackState(id || 'EXP-01');
+  const protocolSteps = (state.steps && state.steps.length > 0) ? state.steps : OFFICIAL_13_STEPS;
 
   // Derive status states
   const statusStr = (state.status || 'WAITING').toUpperCase();
   const isCorrect = statusStr === 'CORRECT';
-  const isCompleted = statusStr === 'COMPLETED';
+  const isCompleted = statusStr === 'COMPLETED' || state.current_step_idx >= 12;
   const isUncertain = statusStr === 'UNCERTAIN' || state.is_uncertain;
-  const isDeviation = ['WRONG_OBJECT', 'WRONG_ACTION', 'STEP_SKIPPED', 'OUT_OF_SEQUENCE'].includes(statusStr);
+  const isDeviation = ['WRONG_OBJECT', 'WRONG_ACTION', 'WRONG_SEQUENCE', 'STEP_SKIPPED', 'OUT_OF_SEQUENCE'].includes(statusStr);
 
   const handleCameraChange = (status: CameraStatus) => {
     setCameraStatus(status);
@@ -249,7 +255,7 @@ export default function LiveExperiment() {
                 {state.current_step?.label || 'Preparation Phase'}
               </h1>
               <span className="font-mono text-xs font-bold text-accent-cyan">
-                STEP {state.current_step_idx + 1} / {state.total_steps || DEFAULT_PROTOCOL_STEPS.length}
+                STEP {state.current_step_idx + 1} / {state.total_steps || protocolSteps.length}
               </span>
             </div>
             
@@ -257,7 +263,7 @@ export default function LiveExperiment() {
             <div className="mt-3 w-full bg-space-800 h-1.5 rounded-full overflow-hidden">
               <div 
                 className="bg-accent-cyan h-full transition-all duration-300"
-                style={{ width: `${Math.min(100, Math.max(5, state.progress_pct || ((state.current_step_idx + 1) / (state.total_steps || 8)) * 100))}%` }}
+                style={{ width: `${Math.min(100, Math.max(5, state.progress_pct || ((state.current_step_idx + 1) / (state.total_steps || protocolSteps.length)) * 100))}%` }}
               />
             </div>
           </div>
@@ -293,10 +299,10 @@ export default function LiveExperiment() {
               <div className="p-3 bg-space-800/90 rounded border border-space-700">
                 <div className="text-space-400 text-[10px] uppercase tracking-wider mb-1">Expected Action</div>
                 <div className="font-bold text-space-100 text-sm truncate">
-                  {state.current_step?.action || 'OPEN_MAIN_BOX'}
+                  {state.current_step?.action || 'IDENTIFY_BLUE_BOX'}
                 </div>
                 <div className="text-[11px] text-accent-cyan mt-1 truncate">
-                  Target: {DEFAULT_PROTOCOL_STEPS[state.current_step_idx]?.expected_object || 'MAIN_BOX'}
+                  Target: {protocolSteps[state.current_step_idx]?.expected_object || 'BLUE_BOX'}
                 </div>
               </div>
 
@@ -348,19 +354,36 @@ export default function LiveExperiment() {
                 )}
               </div>
             </div>
+
+            {/* Voice Prompt Live Latch Card */}
+            <div className="p-3 bg-space-950/80 rounded-lg border border-accent-cyan/30 text-xs font-mono">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] uppercase font-bold text-accent-cyan flex items-center gap-1.5">
+                  <span className={clsx(
+                    "w-2 h-2 rounded-full",
+                    (state.voice_status === 'PLAYING' || state.debug_telemetry?.voice_status === 'PLAYING') ? "bg-emerald-400 animate-pulse" : "bg-space-600"
+                  )} />
+                  VOICE GUIDANCE: {(state.voice_status || state.debug_telemetry?.voice_status || 'IDLE')}
+                </span>
+                <span className="text-[10px] text-space-400">Step {(state.current_step_idx || 0) + 1} of {protocolSteps.length}</span>
+              </div>
+              <div className="text-space-100 font-medium italic">
+                "{state.voice_message || state.debug_telemetry?.voice_prompt || `Step ${state.current_step_idx + 1}. ${protocolSteps[state.current_step_idx]?.label}`}"
+              </div>
+            </div>
           </div>
 
-          {/* PROTOCOL TIMELINE (Full 8-Step View) */}
+          {/* PROTOCOL TIMELINE (Official 13-Step Sequence) */}
           <div className="p-5 flex-1">
             <div className="flex items-center justify-between mb-4">
               <span className="font-mono text-xs font-bold text-space-400 tracking-wider uppercase">Protocol Timeline</span>
               <span className="text-[11px] font-mono text-space-400">
-                {state.completed_steps ? state.completed_steps.length : 0} of {DEFAULT_PROTOCOL_STEPS.length} Done
+                {state.completed_steps ? state.completed_steps.length : 0} of {protocolSteps.length} Done
               </span>
             </div>
 
-            <div className="space-y-3 font-mono text-xs">
-              {DEFAULT_PROTOCOL_STEPS.map((step, idx) => {
+            <div className="space-y-2 font-mono text-xs max-h-[340px] overflow-y-auto pr-1">
+              {protocolSteps.map((step: any, idx: number) => {
                 const isStepCompleted = (state.completed_steps || []).includes(step.id) || idx < state.current_step_idx;
                 const isStepCurrent = idx === state.current_step_idx && !isCompleted;
 
@@ -368,7 +391,7 @@ export default function LiveExperiment() {
                   <div 
                     key={step.id}
                     className={clsx(
-                      "flex items-center justify-between p-2.5 rounded border transition-colors",
+                      "flex items-center justify-between p-2 rounded border transition-colors",
                       isStepCurrent 
                         ? "bg-cyan-950/40 border-accent-cyan/80 text-space-100 shadow-[0_0_10px_rgba(0,229,255,0.1)]" 
                         : isStepCompleted 
@@ -376,34 +399,36 @@ export default function LiveExperiment() {
                         : "bg-space-900/40 border-space-800/60 text-space-400 opacity-60"
                     )}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5">
                       {isStepCompleted ? (
-                        <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                        <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
                       ) : isStepCurrent ? (
-                        <div className="relative w-4 h-4 flex items-center justify-center shrink-0">
+                        <div className="relative w-3.5 h-3.5 flex items-center justify-center shrink-0">
                           <span className="absolute inset-0 rounded-full bg-accent-cyan/40 animate-ping" />
-                          <span className="w-2.5 h-2.5 rounded-full bg-accent-cyan" />
+                          <span className="w-2 h-2 rounded-full bg-accent-cyan" />
                         </div>
                       ) : (
-                        <div className="w-4 h-4 rounded-full border border-space-600 shrink-0" />
+                        <div className="w-3.5 h-3.5 rounded-full border border-space-600 shrink-0" />
                       )}
                       
                       <div>
                         <div className={clsx(
-                          "font-bold",
+                          "font-bold text-[11px]",
                           isStepCurrent ? "text-accent-cyan font-bold" : isStepCompleted ? "text-space-200 line-through decoration-space-600" : "text-space-400"
                         )}>
                           {step.id}. {step.label}
                         </div>
-                        <div className="text-[10px] text-space-400">Target: {step.expected_object}</div>
+                        {step.expected_object && (
+                          <div className="text-[9px] text-space-500">Target: {step.expected_object}</div>
+                        )}
                       </div>
                     </div>
 
                     <span className={clsx(
-                      "text-[10px] px-2 py-0.5 rounded font-bold uppercase",
+                      "text-[9px] px-1.5 py-0.5 rounded font-bold uppercase",
                       isStepCompleted ? "bg-emerald-950 text-emerald-400" :
                       isStepCurrent ? "bg-cyan-950 text-accent-cyan border border-cyan-800" :
-                      "text-space-400"
+                      "text-space-500"
                     )}>
                       {isStepCompleted ? 'DONE' : isStepCurrent ? 'ACTIVE' : 'QUEUED'}
                     </span>
@@ -413,70 +438,94 @@ export default function LiveExperiment() {
             </div>
           </div>
 
-          {/* DEBUG / ENGINEERING TELEMETRY DRAWER (When toggled on) */}
+          {/* Section 20 SIH Development/Debug Telemetry Panel (When toggled on) */}
           {isDebugMode && (
-            <div className="p-4 border-t border-space-700 bg-black/95 font-mono text-[11px] text-space-300 space-y-3">
+            <div className="p-4 border-t border-space-700 bg-black/95 font-mono text-[11px] text-space-300 space-y-2.5">
               <div className="flex items-center justify-between text-xs text-accent-cyan font-bold border-b border-space-800 pb-1">
-                <span>DETECTOR & REASONING DIAGNOSTICS</span>
-                <span className="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">YOLO V3 CANDIDATE</span>
+                <span>SIH DEBUG TELEMETRY PANEL</span>
+                <span className="text-[10px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+                  {state.debug_telemetry?.source || getSourceLabel()}
+                </span>
               </div>
 
-              {/* Core Engine Diagnostics */}
-              <div className="grid grid-cols-2 gap-2 text-[10px] text-space-300">
-                <div>MODEL: <strong className="text-space-100">ORBITA V3</strong> <span className="text-space-400">(Base: V1)</span></div>
-                <div>DATASET: <strong className="text-space-100">V3</strong> <span className="text-space-400">(424 frames)</span></div>
-                <div>YOLO: <strong className="text-emerald-400">ACTIVE</strong> ({(state.ai_fps || 12.4).toFixed(1)} FPS)</div>
-                <div>LATENCY: <strong className="text-accent-cyan">{Math.round(state.pipeline_latency_ms || 68)} ms</strong></div>
-              </div>
-
-              {/* Per-Class Detector Confidence Telemetry */}
-              <div className="space-y-1.5 pt-1 border-t border-space-800/80">
-                <div className="text-[10px] text-space-400 font-bold uppercase tracking-wider flex justify-between">
-                  <span>Target Class</span>
-                  <span>Confidence</span>
+              {/* Section 20 Telemetry Key-Value Specs */}
+              <div className="space-y-1.5 text-[10px] bg-space-900/90 p-2.5 rounded border border-space-800">
+                <div className="flex justify-between">
+                  <span className="text-space-400">SOURCE:</span>
+                  <span className="text-space-100 font-bold">{state.debug_telemetry?.source || getSourceLabel()}</span>
                 </div>
-                {[
-                  { name: 'PERSON', conf: 96, color: 'bg-emerald-500' },
-                  { name: 'MAIN_BOX', conf: 92, color: 'bg-cyan-500' },
-                  { name: 'RED_BOX', conf: 89, color: 'bg-rose-500' },
-                  { name: 'YELLOW_BOX', conf: 91, color: 'bg-amber-400' },
-                  { name: 'SAMPLE', conf: 84, color: 'bg-fuchsia-400' },
-                  { name: 'TOOL', conf: 82, color: 'bg-blue-400' },
-                ].map((item) => (
-                  <div key={item.name} className="flex items-center gap-2 text-[10px]">
-                    <span className="w-20 text-space-300 font-medium">{item.name}</span>
-                    <div className="flex-1 bg-space-800 rounded-full h-1.5 overflow-hidden">
-                      <div className={clsx("h-full rounded-full", item.color)} style={{ width: `${item.conf}%` }} />
+                <div className="flex justify-between">
+                  <span className="text-space-400">FRAME:</span>
+                  <span className="text-space-100 font-bold">
+                    {state.debug_telemetry?.frame ? `${state.debug_telemetry.frame} / ${state.debug_telemetry.total_frames || '?'}` : (cameraStatus?.fps ? 'STREAMING' : '0')}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-space-400">VIDEO TIME:</span>
+                  <span className="text-space-100 font-bold">{state.debug_telemetry?.video_time || '00:00.00'}</span>
+                </div>
+                
+                <div className="pt-1 border-t border-space-800">
+                  <div className="text-space-400 text-[10px] mb-0.5">YOLO:</div>
+                  {state.debug_telemetry?.yolo_detections && state.debug_telemetry.yolo_detections.length > 0 ? (
+                    <div className="space-y-0.5 pl-2">
+                      {state.debug_telemetry.yolo_detections.map((det: string, i: number) => (
+                        <div key={i} className="text-emerald-400 font-semibold">{det}</div>
+                      ))}
                     </div>
-                    <span className="w-8 text-right text-space-200 font-bold">{item.conf}%</span>
-                  </div>
-                ))}
-              </div>
+                  ) : (
+                    <div className="text-space-500 pl-2">No YOLO detections</div>
+                  )}
+                </div>
 
-              {/* Auxiliary Stabilizer & Reasoning State */}
-              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-space-800/80 text-[10px]">
-                <div className="p-1.5 bg-space-900 rounded border border-space-800">
-                  <div className="text-space-400">HYBRID ASSIST</div>
-                  <div className="text-emerald-400 font-bold">ON (Chroma S≥80)</div>
+                <div className="pt-1 border-t border-space-800">
+                  <div className="text-space-400 text-[10px] mb-0.5">TRACKS:</div>
+                  {state.debug_telemetry?.tracks && state.debug_telemetry.tracks.length > 0 ? (
+                    <div className="space-y-0.5 pl-2">
+                      {state.debug_telemetry.tracks.map((trk: string, i: number) => (
+                        <div key={i} className="text-cyan-300">{trk}</div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-space-500 pl-2">No active tracks</div>
+                  )}
                 </div>
-                <div className="p-1.5 bg-space-900 rounded border border-space-800">
-                  <div className="text-space-400">TRACKS & VELOCITY</div>
-                  <div className="text-space-100 font-bold">5 Active Vectors</div>
-                </div>
-              </div>
 
-              <div className="p-2 bg-space-900/90 rounded border border-space-800 text-[10px] space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-space-400">FSM STATE:</span>
-                  <span className="text-accent-cyan font-bold">STEP {(state.current_step_idx || 0) + 1} / {state.total_steps || 8}</span>
+                <div className="pt-1 border-t border-space-800 flex justify-between">
+                  <span className="text-space-400">ACTION:</span>
+                  <span className="text-space-100 font-bold">
+                    {state.debug_telemetry?.action || (state.confirmed_action ? `${state.confirmed_action.action} ${state.confirmed_action.object}` : state.detected_action || 'IDLE')}
+                  </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-space-400">ACTION / CONF:</span>
-                  <span className="text-space-100 font-bold">{state.detected_action || 'IDLE'} ({((state.action_confidence || 0.85) * 100).toFixed(1)}%)</span>
+                  <span className="text-space-400">ACTION STATUS:</span>
+                  <span className={clsx(
+                    "font-bold px-1.5 py-0.2 rounded text-[9px]",
+                    (state.debug_telemetry?.action_status === 'CONFIRMED' || isCorrect) ? "bg-emerald-950 text-emerald-400 border border-emerald-800" :
+                    isDeviation ? "bg-red-950 text-red-400 border border-red-800" :
+                    "bg-space-800 text-space-300"
+                  )}>
+                    {state.debug_telemetry?.action_status || (state.confirmed_action ? state.confirmed_action.status : statusStr)}
+                  </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-space-400">NEXT CANDIDATE:</span>
-                  <span className="text-space-300">{state.next_action || 'IDLE'} ({(state.next_confidence ? state.next_confidence * 100 : 30).toFixed(0)}%)</span>
+                  <span className="text-space-400">FSM:</span>
+                  <span className="text-accent-cyan font-bold">{state.debug_telemetry?.fsm_step || `STEP ${state.current_step_idx + 1}`}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-space-400">VOICE:</span>
+                  <span className="text-space-200 italic truncate max-w-[190px]" title={state.debug_telemetry?.voice_prompt || state.voice_message}>
+                    "{state.debug_telemetry?.voice_prompt || state.voice_message}"
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-space-400">VOICE STATUS:</span>
+                  <span className={clsx(
+                    "font-bold",
+                    (state.debug_telemetry?.voice_status === 'PLAYING' || state.voice_status === 'PLAYING') ? "text-emerald-400 animate-pulse" : "text-space-400"
+                  )}>
+                    {state.debug_telemetry?.voice_status || state.voice_status || 'IDLE'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -494,31 +543,31 @@ function getFallbackState(id: string) {
   return {
     experiment_id: id,
     current_step_idx: 0,
-    total_steps: 8,
+    total_steps: 13,
     status: 'WAITING',
     current_step: {
       id: 1,
-      action: "OPEN_MAIN_BOX",
-      label: "Open Main Box",
-      description: "Open the main experiment container lid."
+      action: "IDENTIFY_BLUE_BOX",
+      label: "Identify the Blue Box",
+      description: "Locate and identify the Blue Box container."
     },
     next_step: {
       id: 2,
-      action: "TAKE_RED_BOX",
-      label: "Take Red Box",
-      description: "Retrieve the red sample box from the container."
+      action: "PICKUP_BLUE_BOX",
+      label: "Pick up the Blue Box",
+      description: "Pick up the Blue Box."
     },
     completed_steps: [],
     failed_steps: [],
     skipped_steps: [],
     detected_action: "IDLE",
-    detected_object: "MAIN_BOX",
+    detected_object: "BLUE_BOX",
     error_type: null,
     recovery_message: null,
-    progress_pct: 12.5,
+    progress_pct: 7.7,
     elapsed_seconds: 0,
-    voice_message: "Ready to start experiment.",
-    hud_message: "Step one: Open the main container lid to begin.",
+    voice_message: "Step 1. Identify the Blue Box.",
+    hud_message: "Step 1: Identify the Blue Box.",
     alert_level: "info",
     fps: 30.0,
     latency_ms: 65,

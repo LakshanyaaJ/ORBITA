@@ -95,7 +95,7 @@ class CameraManager:
                 return self._phone_receiver.frame_buffer
             elif self._active_source == "ip_camera" and self._ip_camera:
                 return self._ip_camera.frame_buffer
-            elif self._active_source == "jetson_camera" and self._jetson_camera:
+            elif self._active_source in ("jetson_camera", "video_file") and self._jetson_camera:
                 return self._jetson_camera.frame_buffer
             return self._sim_buffer
 
@@ -119,7 +119,7 @@ class CameraManager:
                 latency_ms = self._ip_camera.latency_ms
                 status = self._ip_camera.status
                 error = self._ip_camera.error_message or error
-            elif self._active_source == "jetson_camera" and self._jetson_camera:
+            elif self._active_source in ("jetson_camera", "video_file") and self._jetson_camera:
                 connected = self._jetson_camera.is_running()
                 fps = self._jetson_camera.actual_fps
                 status = "connected" if connected else "disconnected"
@@ -130,16 +130,23 @@ class CameraManager:
                 fps = 30.0
                 latency_ms = 0.0
 
+            vid_eof = getattr(self._jetson_camera, "is_eof", False) if self._jetson_camera else False
+            frame_idx = getattr(self._jetson_camera, "frame_index", 0) if self._jetson_camera else 0
+            total_vid_f = getattr(self._jetson_camera, "total_video_frames", 0) if self._jetson_camera else 0
+
             return {
                 "connected": connected,
                 "source": self._active_source,
-                "url": self._active_url if self._active_source == "ip_camera" else "",
+                "url": self._active_url if self._active_source in ("ip_camera", "video_file") else "",
                 "device_index": self._jetson_device_index if self._active_source == "jetson_camera" else None,
                 "fps": round(fps, 1),
                 "latency_ms": round(latency_ms, 1),
                 "status": status,
                 "error": error if error else None,
                 "rotation": self._rotation,
+                "is_eof": vid_eof,
+                "frame_index": frame_idx,
+                "total_frames": total_vid_f,
             }
 
     def get_diagnostics(self) -> Dict[str, Any]:
@@ -265,6 +272,46 @@ class CameraManager:
                 self._last_error = f"Failed to initialize Jetson camera at index {device_index}."
                 return False, self._last_error
 
+    def connect_video_file(self, video_path: str, loop: bool = False) -> Tuple[bool, str]:
+        """
+        Switch to local MP4 video file source (demo mode).
+        Unified pipeline: frames flow through the exact same perception -> tracking -> FSM pipeline.
+        """
+        from pathlib import Path
+        p = Path(video_path)
+        if not p.exists():
+            return False, f"Video file '{video_path}' not found."
+
+        with self._lock:
+            logger.info("CameraManager: Loading video file: %s (loop=%s)", video_path, loop)
+            self._status = "connecting"
+            self._last_error = None
+            self._release_all()
+
+            cfg = CameraConfig(
+                source=str(p.resolve()),
+                width=self.default_config.width,
+                height=self.default_config.height,
+                fps=self.default_config.fps,
+                flip=False,
+            )
+            setattr(cfg, "loop_video", loop)
+            setattr(cfg, "rotation", 0)
+
+            cam = Camera(cfg)
+            if cam.start():
+                self._jetson_camera = cam
+                self._active_source = "video_file"
+                self._active_url = str(p.resolve())
+                self._status = "connected"
+                return True, ""
+            else:
+                self._jetson_camera = None
+                self._active_source = "disconnected"
+                self._status = "error"
+                self._last_error = f"Failed to open video file: {video_path}"
+                return False, self._last_error
+
     def set_simulation_mode(self) -> None:
         """Switch to offline simulation mode."""
         with self._lock:
@@ -296,7 +343,7 @@ class CameraManager:
             return self._phone_receiver.read()
         elif self._active_source == "ip_camera" and self._ip_camera:
             return self._ip_camera.read()
-        elif self._active_source == "jetson_camera" and self._jetson_camera:
+        elif self._active_source in ("jetson_camera", "video_file") and self._jetson_camera:
             return self._jetson_camera.read()
         elif self._active_source == "sim":
             frame, _, _ = self._sim_buffer.get_latest()
@@ -311,7 +358,7 @@ class CameraManager:
             return self._phone_receiver.read_with_metadata()
         elif self._active_source == "ip_camera" and self._ip_camera:
             return self._ip_camera.read_with_metadata()
-        elif self._active_source == "jetson_camera" and self._jetson_camera:
+        elif self._active_source in ("jetson_camera", "video_file") and self._jetson_camera:
             return self._jetson_camera.read_with_metadata()
         elif self._active_source == "sim":
             frame, ts, _ = self._sim_buffer.get_latest()

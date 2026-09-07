@@ -23,6 +23,17 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+from enum import Enum
+
+class ObjectPhysicalState(str, Enum):
+    ON_TABLE = "ON_TABLE"
+    HAND_CONTACT = "HAND_CONTACT"
+    BEING_HELD = "BEING_HELD"
+    CARRIED = "CARRIED"
+    RELEASED = "RELEASED"
+    PLACED = "PLACED"
+
+
 @dataclass
 class TrackedState:
     track_id: int
@@ -30,14 +41,68 @@ class TrackedState:
     bbox: tuple[int, int, int, int]  # x, y, w, h
     centroid: tuple[int, int]        # cx, cy
     confidence: float
-    raw_label: str
-    source: str
+    raw_label: str = ""
+    source: str = "detector"
+    identity: str = ""
+    raw_class: str = ""
+    semantic_identity: str = ""
     velocity: tuple[float, float] = (0.0, 0.0)  # px/sec (vx, vy)
+    state: str = "ON_TABLE"
     first_seen: float = 0.0
     last_seen: float = 0.0
     hits: int = 1
     time_since_update: int = 0
+    hand_contact: bool = False
+    held_duration: float = 0.0
+    initial_position: tuple[int, int] = (0, 0)
     history: List[tuple[int, int]] = field(default_factory=list)
+    velocity_history: List[tuple[float, float]] = field(default_factory=list)
+    hand_contact_history: List[bool] = field(default_factory=list)
+    physical_state_history: List[str] = field(default_factory=list)
+    pickup_time: Optional[float] = None
+    release_time: Optional[float] = None
+    placement_location: str = ""
+
+    def __post_init__(self):
+        if not self.raw_class:
+            self.raw_class = self.raw_label or self.class_name
+        if not self.semantic_identity:
+            self.semantic_identity = self.identity or self.class_name
+        if not self.identity:
+            self.identity = self.semantic_identity
+        if not self.raw_label:
+            self.raw_label = self.raw_class
+        if self.initial_position == (0, 0) and self.centroid != (0, 0):
+            self.initial_position = self.centroid
+        if not self.history and self.centroid != (0, 0):
+            self.history.append(self.centroid)
+        if not self.velocity_history:
+            self.velocity_history.append(self.velocity)
+        if not self.hand_contact_history:
+            self.hand_contact_history.append(self.hand_contact)
+        if not self.physical_state_history:
+            state_str = self.state.value if hasattr(self.state, "value") else str(self.state)
+            self.physical_state_history.append(state_str)
+
+    @property
+    def center(self) -> tuple[int, int]:
+        return self.centroid
+
+    @property
+    def physical_state(self) -> str:
+        return self.state.value if hasattr(self.state, "value") else str(self.state)
+
+    @physical_state.setter
+    def physical_state(self, val: Any) -> None:
+        self.state = val
+
+    @property
+    def current_position(self) -> tuple[int, int]:
+        return self.centroid
+
+    @property
+    def position_history(self) -> List[tuple[int, int]]:
+        return self.history
 
 
 def compute_iou(boxA: tuple[int, int, int, int], boxB: tuple[int, int, int, int]) -> float:
@@ -162,14 +227,23 @@ class MultiObjectTracker:
                     track.history.append(track.centroid)
                     if len(track.history) > 30:
                         track.history.pop(0)
+                    track.velocity_history.append(track.velocity)
+                    if len(track.velocity_history) > 30:
+                        track.velocity_history.pop(0)
+                    track.hand_contact_history.append(track.hand_contact)
+                    if len(track.hand_contact_history) > 30:
+                        track.hand_contact_history.pop(0)
+                    track.physical_state_history.append(track.physical_state)
+                    if len(track.physical_state_history) > 30:
+                        track.physical_state_history.pop(0)
 
                     # Update detection object
                     det.bbox = track.bbox
                     det.centroid = track.centroid
-                    if hasattr(det, "track_id"):
-                        det.track_id = t_id
-                    if hasattr(det, "velocity"):
-                        det.velocity = track.velocity
+                    det.track_id = t_id
+                    det.velocity = track.velocity
+                    det.state = track.state
+                    det.identity = track.identity or det.class_name
 
                     matched_tracks.add(t_id)
                     matched_detections.add(d_idx)
@@ -191,18 +265,23 @@ class MultiObjectTracker:
                     confidence=det.confidence,
                     raw_label=getattr(det, "raw_label", ""),
                     source=getattr(det, "source", "detector"),
+                    identity=getattr(det, "semantic_identity", "") or det.class_name,
+                    raw_class=getattr(det, "raw_label", "") or det.class_name,
+                    semantic_identity=getattr(det, "semantic_identity", "") or det.class_name,
                     velocity=(0.0, 0.0),
+                    state="ON_TABLE",
                     first_seen=timestamp,
                     last_seen=timestamp,
                     hits=1,
                     time_since_update=0,
+                    initial_position=det.centroid,
                     history=[det.centroid],
                 )
                 self._tracks[new_id] = new_track
-                if hasattr(det, "track_id"):
-                    det.track_id = new_id
-                if hasattr(det, "velocity"):
-                    det.velocity = (0.0, 0.0)
+                det.track_id = new_id
+                det.velocity = (0.0, 0.0)
+                det.state = "ON_TABLE"
+                det.identity = new_track.identity
 
         # Remove dead tracks that exceeded max_age
         dead_ids = [t_id for t_id, t in self._tracks.items() if t.time_since_update > self.max_age]
@@ -212,13 +291,49 @@ class MultiObjectTracker:
         # Determine primary operator if persons are present
         persons = [t for t in self._tracks.values() if t.class_name == "PERSON" and t.time_since_update == 0]
         if persons:
-            # Primary operator: person closest to experiment workspace (or largest bounding box area)
             primary = max(persons, key=lambda p: p.bbox[2] * p.bbox[3])
             self._primary_operator_id = primary.track_id
         else:
             self._primary_operator_id = None
 
         return detections
+
+    def update_interaction_states(self, interactions: list[Any], dt: float = 0.033) -> None:
+        """Update physical tracking states (ON_TABLE, HAND_CONTACT, BEING_HELD, CARRIED, RELEASED, PLACED)."""
+        now = time.time()
+        active_objects = set()
+        for inter in interactions:
+            obj_cls = getattr(inter, "object_class", "")
+            is_holding = getattr(inter, "is_holding", False)
+            state_val = getattr(inter, "state", None)
+            state_name = getattr(state_val, "name", str(state_val))
+
+            for track in self._tracks.values():
+                if track.class_name == obj_cls or track.identity == obj_cls:
+                    active_objects.add(track.track_id)
+                    speed = (track.velocity[0] ** 2 + track.velocity[1] ** 2) ** 0.5
+                    if is_holding or state_name in ("HOLDING", "GRASPING"):
+                        track.hand_contact = True
+                        track.held_duration += dt
+                        track.state = ObjectPhysicalState.CARRIED if speed > 30.0 else ObjectPhysicalState.BEING_HELD
+                        if track.pickup_time is None:
+                            track.pickup_time = now
+                    elif state_name in ("CONTACT", "NEAR_OBJECT"):
+                        track.hand_contact = True
+                        track.state = ObjectPhysicalState.HAND_CONTACT
+                    elif state_name in ("RELEASING", "RELEASED"):
+                        track.hand_contact = False
+                        track.held_duration = 0.0
+                        track.state = ObjectPhysicalState.PLACED
+                        track.release_time = now
+                        track.placement_location = "LOCATION_A" if track.centroid[0] < 640 else "LOCATION_B"
+
+        # Reset objects not currently interacting
+        for track in self._tracks.values():
+            if track.track_id not in active_objects:
+                track.hand_contact = False
+                if track.state in (ObjectPhysicalState.HAND_CONTACT, ObjectPhysicalState.RELEASED):
+                    track.state = ObjectPhysicalState.ON_TABLE
 
     def get_track(self, track_id: int) -> Optional[TrackedState]:
         return self._tracks.get(track_id)

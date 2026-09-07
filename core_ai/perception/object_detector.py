@@ -43,6 +43,7 @@ class DetectedObject:
     raw_label: str = ""               # original YOLO COCO label
     track_id: int = -1
     velocity: tuple[float, float] = (0.0, 0.0)
+    semantic_identity: str = ""
 
     @property
     def is_yolo(self) -> bool:
@@ -87,6 +88,18 @@ class DetectedObject:
 # Colour ranges for HSV chroma detection
 # --------------------------------------------------------------------------- #
 DEFAULT_HSV_RANGES: dict[str, tuple[np.ndarray, np.ndarray]] = {
+    "BLUE_BOX": (               # Expanded blue container
+        np.array([95,  55,   30]),
+        np.array([135, 255, 255]),
+    ),
+    "MAIN_BOX": (               # Backward compatible alias for blue container
+        np.array([95,  55,   30]),
+        np.array([135, 255, 255]),
+    ),
+    "YELLOW_BOX": (
+        np.array([18,  90,   70]),
+        np.array([38,  255, 255]),
+    ),
     "RED_BOX": (
         np.array([0,   140,  70]),
         np.array([10,  255, 255]),
@@ -94,14 +107,6 @@ DEFAULT_HSV_RANGES: dict[str, tuple[np.ndarray, np.ndarray]] = {
     "RED_BOX_HIGH": (           # Red wraps around H=180
         np.array([170, 140,  70]),
         np.array([180, 255, 255]),
-    ),
-    "YELLOW_BOX": (
-        np.array([18,  90,   70]),
-        np.array([38,  255, 255]),
-    ),
-    "MAIN_BOX": (               # Expanded for blue container under bright/dim lighting
-        np.array([95,  55,   30]),
-        np.array([135, 255, 255]),
     ),
     "SAMPLE": (
         np.array([45,  70,   70]),
@@ -233,6 +238,9 @@ class ObjectDetector:
                 stream=False,
             )
             objs: list[DetectedObject] = []
+            raw_telemetry: list[dict] = []
+            mapped_telemetry: list[dict] = []
+
             for r in results:
                 if not r.boxes:
                     continue
@@ -244,10 +252,23 @@ class ObjectDetector:
                     w, h = max(1, x2 - x1), max(1, y2 - y1)
                     cx, cy = x1 + w // 2, y1 + h // 2
 
+                    raw_telemetry.append({
+                        "raw_class": raw_name,
+                        "confidence": round(conf, 3),
+                        "bbox": [x1, y1, w, h]
+                    })
+
                     # Map raw YOLO/COCO object to ORBITA semantic experiment class
                     mapped_class, adj_conf = self._classify_yolo_object(
                         frame, raw_name, conf, x1, y1, w, h
                     )
+
+                    mapped_telemetry.append({
+                        "semantic_class": mapped_class,
+                        "raw_class": raw_name,
+                        "confidence": round(adj_conf, 3),
+                        "bbox": [x1, y1, w, h]
+                    })
 
                     objs.append(DetectedObject(
                         class_name=mapped_class,
@@ -257,7 +278,11 @@ class ObjectDetector:
                         timestamp=timestamp,
                         source="yolo",
                         raw_label=raw_name.lower(),
+                        semantic_identity=mapped_class,
                     ))
+
+            self.last_raw_yolo_detections = raw_telemetry
+            self.last_mapped_detections = mapped_telemetry
             return objs
         except Exception as exc:
             logger.warning("YOLO inference error: %s", exc)
@@ -274,18 +299,18 @@ class ObjectDetector:
         h: int,
     ) -> tuple[str, float]:
         """
-        Maps standard COCO object classes to ORBITA experiment ontology:
-          - PERSON      -> person
-          - SAMPLE      -> bottle, cup, bowl, vase, apple, etc.
-          - TOOL        -> scissors, knife, fork, spoon, remote, phone, toothbrush
-          - MAIN_BOX    -> suitcase, backpack, book, laptop, large container
-          - RED_BOX     -> any container/box/book with dominant red hue
-          - YELLOW_BOX  -> any container/box/book with dominant yellow hue
+        Transparently separates RAW YOLO detections from SECONDARY PERCEPTION
+        and maps to ORBITA official semantic ontology:
+          - BLUE_BOX    -> Blue container / main box / book/laptop with blue hue
+          - YELLOW_BOX  -> Yellow container / box with yellow hue
+          - PEN         -> Pen / pencil / stylus / tool / scissors / elongated instrument
+          - WATCH       -> Watch / clock / small circular sample
+          - PERSON      -> Human operator
         """
         raw_lower = raw_name.lower().strip()
 
-        # 1. Exact match with ORBITA schema
-        if raw_name in ("PERSON", "MAIN_BOX", "RED_BOX", "YELLOW_BOX", "SAMPLE", "TOOL", "CHAMBER"):
+        # 1. Exact match with ORBITA official ontology
+        if raw_name in ("BLUE_BOX", "YELLOW_BOX", "PEN", "WATCH", "PERSON"):
             return raw_name, conf
 
         if raw_lower == "person":
@@ -311,44 +336,42 @@ class ObjectDetector:
             h_c, s_c, v_c = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
             total = h_c.size
             if total > 0:
-                # Real red plastic container has deep saturation (>130), unlike human skin (50-110)
                 red_px = np.count_nonzero(((h_c <= 10) | (h_c >= 170)) & (s_c > 130) & (v_c > 50))
                 yellow_px = np.count_nonzero((h_c >= 16) & (h_c <= 38) & (s_c > 70) & (v_c > 50))
-                green_px = np.count_nonzero((h_c >= 45) & (h_c <= 88) & (s_c > 55) & (v_c > 40))
                 blue_px = np.count_nonzero((h_c >= 95) & (h_c <= 135) & (s_c > 55) & (v_c > 35))
 
                 if red_px / total > 0.20:
                     color = "RED"
                 elif yellow_px / total > 0.15:
                     color = "YELLOW"
-                elif green_px / total > 0.15:
-                    color = "GREEN"
                 elif blue_px / total > 0.20:
                     color = "BLUE"
 
         # 3. Categorize by semantic class and color
-        # Tools & instruments
-        if raw_lower in ("scissors", "knife", "fork", "spoon", "toothbrush", "hair drier", "remote", "cell phone"):
-            return "TOOL", max(conf, 0.85)
+        # Pen / Tools
+        if raw_lower in ("pen", "pencil", "marker", "stylus", "scissors", "knife", "fork", "spoon", "toothbrush", "remote", "cell phone") or raw_name == "TOOL":
+            return "PEN", max(conf, 0.85)
 
-        # Samples (small containers, vials, biological specimens)
-        if raw_lower in ("bottle", "cup", "wine glass", "bowl", "vase", "apple", "orange", "banana"):
-            return "SAMPLE", max(conf, 0.85)
+        # Watch / Clock / Small circular specimens
+        if raw_lower in ("clock", "watch", "wristwatch", "timer", "stopwatch") or (raw_name == "SAMPLE" and w * h < 18000):
+            return "WATCH", max(conf, 0.85)
 
-        # Color-specific boxes (only for physical containers, packages, books, or unclassified box-like objects)
-        if raw_lower in ("box", "suitcase", "backpack", "handbag", "book", "package", "laptop"):
-            if color == "RED":
-                return "RED_BOX", max(conf, 0.88)
+        # Containers & Boxes
+        if raw_name == "MAIN_BOX" or color == "BLUE":
+            return "BLUE_BOX", max(conf, 0.88)
+        if raw_name == "YELLOW_BOX" or color == "YELLOW":
+            return "YELLOW_BOX", max(conf, 0.88)
+        if raw_name == "RED_BOX" or color == "RED":
+            return "RED_BOX", max(conf, 0.88)
+
+        if raw_lower in ("box", "suitcase", "backpack", "handbag", "book", "package", "laptop", "container"):
             if color == "YELLOW":
                 return "YELLOW_BOX", max(conf, 0.88)
-            if (w * h > 30000) or color == "BLUE":
-                return "MAIN_BOX", max(conf, 0.90)
-            return "MAIN_BOX", max(conf, 0.82)
-
-        if color == "YELLOW" and raw_lower not in ("tie", "clock", "chair"):
-            return "YELLOW_BOX", max(conf, 0.80)
-        if color == "BLUE" and raw_lower not in ("tie", "clock", "chair"):
-            return "MAIN_BOX", max(conf, 0.80)
+            if color == "BLUE":
+                return "BLUE_BOX", max(conf, 0.88)
+            if color == "RED":
+                return "RED_BOX", max(conf, 0.88)
+            return "BLUE_BOX", max(conf, 0.82)
 
         return raw_name, conf
 
@@ -639,6 +662,8 @@ class ObjectDetector:
 
             candidates = [
                 Path(model_path),
+                Path("models/orbita_yolo_detector_v3.pt"),
+                Path(__file__).parent.parent.parent / "models" / "orbita_yolo_detector_v3.pt",
                 Path("models/yolov8n.pt"),
                 Path(__file__).parent.parent.parent / "models" / "yolov8n.pt",
                 Path("yolov8n.pt"),
@@ -673,6 +698,26 @@ class ObjectDetector:
                 self._device = "cpu"
                 logger.info("YOLO running on CPU.")
 
+            # Section 11 debug telemetry
+            classes_list = list(self._yolo.names.values()) if hasattr(self._yolo, "names") else []
+            logger.info(
+                "\n================ MODEL DEBUG ================\n"
+                "MODEL:\n"
+                "path=%s\n"
+                "classes=%s\n"
+                "device=%s\n"
+                "imgsz=%s\n"
+                "conf=%.2f\n"
+                "iou=%.2f\n"
+                "=============================================",
+                self._active_model_path,
+                classes_list,
+                self._device,
+                getattr(self.config, "yolo_imgsz", 480),
+                self.confidence_threshold,
+                getattr(self.config, "iou_threshold", 0.45),
+            )
+
         except ImportError:
             logger.warning("ultralytics not installed — fallback to chroma detection.")
         except Exception as exc:
@@ -680,7 +725,19 @@ class ObjectDetector:
 
     @property
     def active_model_path(self) -> str:
-        return getattr(self, "_active_model_path", "models/yolov8n.pt")
+        return getattr(self, "_active_model_path", "models/orbita_yolo_detector_v3.pt")
+
+    def get_model_telemetry(self) -> dict:
+        """Returns structured model telemetry for debugging."""
+        classes_list = list(self._yolo.names.values()) if (self._yolo and hasattr(self._yolo, "names")) else []
+        return {
+            "path": getattr(self, "_active_model_path", "unknown"),
+            "classes": classes_list,
+            "device": getattr(self, "_device", "cpu"),
+            "imgsz": getattr(self.config, "yolo_imgsz", 480),
+            "conf": self.confidence_threshold,
+            "iou": getattr(self.config, "iou_threshold", 0.45),
+        }
 
     def load_model(self, model_path: str) -> bool:
         """Dynamically reload YOLO detector with a new version weights checkpoint."""
@@ -696,6 +753,17 @@ class ObjectDetector:
             self._yolo = new_yolo
             self._active_model_path = str(p.resolve())
             logger.info("Successfully hot-reloaded YOLO detector from %s", p)
+            classes_list = list(new_yolo.names.values()) if hasattr(new_yolo, "names") else []
+            logger.info(
+                "\n================ MODEL DEBUG ================\n"
+                "MODEL:\npath=%s\nclasses=%s\ndevice=%s\nimgsz=%s\nconf=%.2f\niou=%.2f\n=============================================",
+                self._active_model_path,
+                classes_list,
+                self._device,
+                getattr(self.config, "yolo_imgsz", 480),
+                self.confidence_threshold,
+                getattr(self.config, "iou_threshold", 0.45),
+            )
             return True
         except Exception as exc:
             logger.error("Failed to hot-reload YOLO detector from %s: %s", model_path, exc)

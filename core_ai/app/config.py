@@ -40,6 +40,7 @@ class CameraConfig:
     prefer_hardware_acceleration: bool = True
     low_latency: bool = True
     ai_fps: int = 15
+    sequential: bool = False        # True = synchronous frame-by-frame read without dropping
 
 
 # --------------------------------------------------------------------------- #
@@ -62,9 +63,9 @@ class DetectionConfig:
         "SAMPLE":     [60, 80, 80, 90, 255, 255],      # Green
     })
 
-    yolo_model_path: str = str(MODELS_DIR / "yolov8n.pt")
+    yolo_model_path: str = str(MODELS_DIR / "orbita_yolo_detector_v3.pt") if (MODELS_DIR / "orbita_yolo_detector_v3.pt").exists() else str(MODELS_DIR / "yolov8n.pt")
     use_yolo: bool = True           # Falls back to chroma-only if False or model absent
-    confidence_threshold: float = 0.40
+    confidence_threshold: float = 0.35
     min_area_px: int = 400          # Ignore tiny detections
     yolo_imgsz: int = 480
 
@@ -166,6 +167,11 @@ class ExperimentStep:
     voice_prompt: str
     completion_voice: str
     timeout_seconds: int
+    expected_action: str = ""
+    expected_object: str = ""
+    expected_target: str = ""
+    from_location: str = ""
+    to_location: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -212,16 +218,21 @@ def load_config(experiment_config_path: str | None = None) -> OrbitaConfig:
 
         # Load experiment steps
         cfg.experiment_steps = [
-            ExperimentStep(**{
-                "id": s["id"],
-                "action": s["action"],
-                "label": s["label"],
-                "description": s["description"],
-                "expected_objects": s["expected_objects"],
-                "voice_prompt": s["voice_prompt"],
-                "completion_voice": s["completion_voice"],
-                "timeout_seconds": s["timeout_seconds"],
-            })
+            ExperimentStep(
+                id=s["id"],
+                action=s["action"],
+                label=s["label"],
+                description=s["description"],
+                expected_objects=s.get("expected_objects", []),
+                voice_prompt=s["voice_prompt"],
+                completion_voice=s.get("completion_voice", ""),
+                timeout_seconds=s.get("timeout_seconds", 30),
+                expected_action=s.get("expected_action", ""),
+                expected_object=s.get("expected_object", ""),
+                expected_target=s.get("expected_target", ""),
+                from_location=s.get("from_location", ""),
+                to_location=s.get("to_location", ""),
+            )
             for s in data.get("steps", [])
         ]
 
