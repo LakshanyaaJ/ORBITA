@@ -51,6 +51,8 @@ class ValidationResult:
     total_frames: int = 0
     video_time: str = "00:00.00"
     tracks: list[Any] = field(default_factory=list)
+    frame_age_ms: float = 0.0
+    is_stale: bool = False
 
     def to_dict(self) -> dict:
         d = self.fsm_state.to_dict()
@@ -60,6 +62,9 @@ class ValidationResult:
         d["alert_level"] = self.alert_level
         d["fps"] = round(self.fps, 1)
         d["latency_ms"] = round(self.latency_ms, 2)
+        d["frame_age_ms"] = round(self.frame_age_ms, 1)
+        d["live_edge"] = "LIVE" if self.frame_age_ms < 250 else ("STREAM BEHIND" if self.frame_age_ms < 1500 else "CRITICAL STREAM LATENCY")
+        d["is_stale"] = self.is_stale
         d["steps"] = self.steps
         if self.confirmed_action:
             d["confirmed_action"] = {
@@ -341,10 +346,13 @@ class StateManager:
         frame_index: int = 0,
         total_frames: int = 0,
         video_time: str = "00:00.00",
+        frame_age_ms: float = 0.0,
+        is_stale: bool = False,
     ) -> ValidationResult:
         """
         Process perception & interaction evidence through ActionConfirmationGate and FSM.
         Voice guidance is strictly driven by confirmed FSM step transitions.
+        If is_stale is True, action confirmation is bypassed to prevent state advancement on backlog frames.
         """
         now = time.time()
         curr_voice_stat = self.voice_status
@@ -357,17 +365,26 @@ class StateManager:
             else self._resolve_object(prediction, detected_objects, interactions)
         )
 
-        # 1. Action Confirmation Gate
+        # 1. Action Confirmation Gate (with stale frame protection)
         current_step = self.fsm.current_step
-        confirmed_action = self.action_gate.evaluate(
-            current_step=current_step,
-            detected_objects=detected_objects,
-            tracks=tracks or [],
-            interactions=interactions or [],
-            har_action=prediction.action,
-            har_confidence=prediction.confidence,
-            fps=fps,
-        )
+        if is_stale:
+            # Stale frame safeguard: do not confirm actions on delayed/stale frames
+            confirmed_action = ConfirmedAction(
+                action="IDLE",
+                object_name="",
+                status=ActionGateStatus.WAITING,
+                confidence=0.0,
+            )
+        else:
+            confirmed_action = self.action_gate.evaluate(
+                current_step=current_step,
+                detected_objects=detected_objects,
+                tracks=tracks or [],
+                interactions=interactions or [],
+                har_action=prediction.action,
+                har_confidence=prediction.confidence,
+                fps=fps,
+            )
 
         # 2. Run FSM with confirmed action (or heuristic fallback if in WAITING without active tracks)
         effective_confirmed = confirmed_action if (confirmed_action.status != ActionGateStatus.WAITING or bool(tracks) or bool(interactions)) else None
@@ -490,6 +507,8 @@ class StateManager:
             total_frames=total_frames,
             video_time=video_time,
             tracks=tracks or [],
+            frame_age_ms=frame_age_ms,
+            is_stale=is_stale,
         )
 
     def reset(self) -> None:

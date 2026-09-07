@@ -59,6 +59,9 @@ export default function LiveExperiment() {
   const isUncertain = statusStr === 'UNCERTAIN' || state.is_uncertain;
   const isDeviation = ['WRONG_OBJECT', 'WRONG_ACTION', 'WRONG_SEQUENCE', 'STEP_SKIPPED', 'OUT_OF_SEQUENCE'].includes(statusStr);
 
+  const frameAge = (state as any).frame_age_ms ?? 0;
+  const liveEdgeStatus = (state as any).live_edge || (frameAge < 250 ? 'LIVE' : (frameAge < 1000 ? 'BEHIND' : 'CRITICAL'));
+
   const handleCameraChange = (status: CameraStatus) => {
     setCameraStatus(status);
     if (status.connected && videoError) {
@@ -123,10 +126,21 @@ export default function LiveExperiment() {
           {/* Top-left video badge overlays */}
           <div className="absolute top-3 left-4 z-10 flex items-center gap-2">
             <span className={clsx(
-              "font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded shadow",
-              isConnected ? "bg-emerald-500/90 text-black" : "bg-red-500/90 text-white"
+              "font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded shadow flex items-center gap-1.5",
+              liveEdgeStatus === 'LIVE' ? "bg-emerald-500/90 text-black" : (
+                liveEdgeStatus === 'BEHIND' ? "bg-amber-500/90 text-black" : "bg-red-500/90 text-white animate-pulse"
+              )
             )}>
-              {isConnected ? 'LIVE TELEMETRY' : 'TELEMETRY OFFLINE'}
+              <span className={clsx("w-1.5 h-1.5 rounded-full", liveEdgeStatus === 'LIVE' ? "bg-black" : "bg-white")} />
+              {liveEdgeStatus === 'LIVE' ? `LIVE EDGE (${Math.round(frameAge)}ms)` : (
+                liveEdgeStatus === 'BEHIND' ? `STREAM BEHIND (${Math.round(frameAge)}ms)` : `CRITICAL STREAM LATENCY (${Math.round(frameAge)}ms)`
+              )}
+            </span>
+            <span className={clsx(
+              "font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded shadow",
+              isConnected ? "bg-space-800/90 text-emerald-400 border border-emerald-500/40" : "bg-red-500/90 text-white"
+            )}>
+              {isConnected ? 'TELEMETRY' : 'OFFLINE'}
             </span>
             <span className="font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-accent-cyan/90 text-black flex items-center gap-1.5 shadow">
               <Video size={12} />
@@ -225,10 +239,11 @@ export default function LiveExperiment() {
               <div><span className="text-space-400">STREAM:</span> <span className="text-emerald-400 font-bold">{cameraStatus?.fps ? cameraStatus.fps.toFixed(1) : '30.0'} FPS</span></div>
               <div><span className="text-space-400">AI WORKER:</span> <span className="text-accent-cyan font-bold">{state.fps ? state.fps.toFixed(1) : '14.5'} FPS</span></div>
               <div><span className="text-space-400">LATENCY:</span> <span className="text-space-100 font-bold">{state.latency_ms ? `${Math.round(state.latency_ms)}ms` : '62ms'}</span></div>
+              <div><span className="text-space-400">FRAME AGE:</span> <span className={clsx("font-bold", frameAge < 250 ? "text-emerald-400" : (frameAge < 1000 ? "text-amber-400" : "text-red-400"))}>{Math.round(frameAge)}ms</span></div>
               <div><span className="text-space-400">ACTION CONF:</span> <span className="text-space-100 font-bold">{state.action_confidence ? `${Math.round(state.action_confidence * 100)}%` : '88%'}</span></div>
             </div>
             <div className="flex items-center gap-4 text-[11px] text-space-400">
-              <span>MODEL: <strong className="text-space-200">v1-production</strong></span>
+              <span>EDGE: <strong className={liveEdgeStatus === 'LIVE' ? "text-emerald-400" : (liveEdgeStatus === 'BEHIND' ? "text-amber-400" : "text-red-400")}>{liveEdgeStatus}</strong></span>
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             </div>
           </div>
@@ -450,6 +465,23 @@ export default function LiveExperiment() {
 
               {/* Section 20 Telemetry Key-Value Specs */}
               <div className="space-y-1.5 text-[10px] bg-space-900/90 p-2.5 rounded border border-space-800">
+                <div className="flex justify-between">
+                  <span className="text-space-400">LIVE EDGE:</span>
+                  <span className={clsx(
+                    "font-bold px-1.5 py-0.2 rounded text-[9px]",
+                    liveEdgeStatus === 'LIVE' ? "bg-emerald-950 text-emerald-400 border border-emerald-800" :
+                    liveEdgeStatus === 'BEHIND' ? "bg-amber-950 text-amber-400 border border-amber-800" :
+                    "bg-red-950 text-red-400 border border-red-800"
+                  )}>
+                    {liveEdgeStatus === 'LIVE' ? 'YES' : 'BEHIND'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-space-400">FRAME AGE:</span>
+                  <span className={clsx("font-bold", frameAge < 250 ? "text-emerald-400" : (frameAge < 1000 ? "text-amber-400" : "text-red-400"))}>
+                    {Math.round(frameAge)} ms
+                  </span>
+                </div>
                 <div className="flex justify-between">
                   <span className="text-space-400">SOURCE:</span>
                   <span className="text-space-100 font-bold">{state.debug_telemetry?.source || getSourceLabel()}</span>

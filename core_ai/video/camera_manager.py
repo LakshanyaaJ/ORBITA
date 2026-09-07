@@ -362,7 +362,7 @@ class CameraManager:
             return self._jetson_camera.read_with_metadata()
         elif self._active_source == "sim":
             frame, ts, _ = self._sim_buffer.get_latest()
-            lat = max(0.0, (time.time() - ts) * 1000.0) if ts else 0.0
+            lat = max(0.0, (time.monotonic() - ts) * 1000.0) if ts else 0.0
             return frame, 30.0, lat
         return None, 0.0, 0.0
 

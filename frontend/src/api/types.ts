@@ -61,6 +61,9 @@ export interface ValidationResult extends FSMState {
   next_action?: string;
   next_confidence?: number;
   is_uncertain?: boolean;
+  frame_age_ms?: number;
+  live_edge?: string;
+  is_stale?: boolean;
   steps?: ExperimentStep[];
   confirmed_action?: ConfirmedActionInfo;
   debug_telemetry?: DebugTelemetry;

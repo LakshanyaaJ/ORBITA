@@ -207,7 +207,7 @@ class Camera:
 
         frame, ts, _ = self._frame_buffer.get_latest()
         if frame is not None:
-            self._latency_ms = max(0.0, (time.time() - ts) * 1000.0)
+            self._latency_ms = max(0.0, (time.monotonic() - ts) * 1000.0)
             return frame
 
         try:
@@ -216,7 +216,7 @@ class Camera:
             return None
 
     def read_with_metadata(self) -> Tuple[Optional[np.ndarray], float, float]:
-        """Returns (frame, actual_fps, latency_ms)."""
+        """Returns (frame, actual_fps, frame_age_ms)."""
         frame = self.read()
         return frame, self._actual_fps, self._latency_ms
 
@@ -264,7 +264,7 @@ class Camera:
         target_dt = 1.0 / max(1.0, self._video_fps)
 
         while self._running and self._cap is not None:
-            t0 = time.time()
+            t0 = time.monotonic()
             ret, frame = self._cap.read()
             if not ret:
                 if isinstance(self.source, str):

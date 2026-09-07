@@ -161,6 +161,7 @@ class AppState:
         self.is_running: bool = False
         self.annotation_cache = AnnotationCache()
         self.ai_thread: Optional[threading.Thread] = None
+        self.stream_thread: Optional[threading.Thread] = None
         self.stream_task: Optional[asyncio.Task] = None
         self.pipeline_task: Optional[asyncio.Task] = None
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -172,7 +173,7 @@ class AppState:
         self.total_pipeline_latency_ms: float = 0.0
         self.last_result: Optional[ValidationResult] = None
         self.frame_count: int = 0
-        self._fps_timer: float = time.time()
+        self._fps_timer: float = time.monotonic()
 
     @property
     def camera(self) -> Optional[Camera]:
@@ -297,17 +298,21 @@ async def _startup() -> None:
     )
     _state.ai_thread.start()
 
-    # 2. Start high-speed streaming task (25-30 FPS)
-    _state.stream_task = asyncio.create_task(_streaming_loop())
-    _state.pipeline_task = _state.stream_task  # Maintain reference
+    # 2. Start high-speed streaming worker thread (25-30 FPS, offloaded from asyncio loop)
+    _state.stream_thread = threading.Thread(
+        target=_stream_producer_thread,
+        daemon=True,
+        name="orbita-stream-worker",
+    )
+    _state.stream_thread.start()
 
     logger.info("ORBITA low-latency backend initialized (AI Worker + Decoupled Streamer active).")
 
 
 async def _shutdown() -> None:
     _state.is_running = False
-    if _state.stream_task:
-        _state.stream_task.cancel()
+    if _state.stream_thread and _state.stream_thread.is_alive():
+        _state.stream_thread.join(timeout=2.0)
     if _state.ai_thread and _state.ai_thread.is_alive():
         _state.ai_thread.join(timeout=2.0)
     if _state.camera_manager:
@@ -404,13 +409,17 @@ def _execute_ai_cycle() -> None:
         if frame is None:
             return
 
-        latency_ms = max(0.0, (time.time() - cap_ts) * 1000.0)
         if active_source == "video_file":
+            latency_ms = 0.0
+            is_stale = False
             cam_name = "Demo MP4"
-        elif active_source in ("ip_camera", "phone_webcam"):
-            cam_name = "Phone Camera"
         else:
-            cam_name = "Jetson Camera"
+            latency_ms = max(0.0, (time.monotonic() - cap_ts) * 1000.0)
+            is_stale = latency_ms > 500.0
+            if active_source in ("ip_camera", "phone_webcam"):
+                cam_name = "Phone Camera"
+            else:
+                cam_name = "Jetson Camera"
         t_stamp = time.time()
 
         # Perception: run pose & hand tracking first so detector has hand context
@@ -458,13 +467,13 @@ def _execute_ai_cycle() -> None:
         cam_source_tag = "MP4"
     elif active_source == "ip_camera":
         cam_source_tag = "IP CAMERA"
-        video_time_str = time.strftime("%M:%S", time.localtime(cap_ts if 'cap_ts' in locals() else time.time()))
+        video_time_str = time.strftime("%M:%S", time.localtime())
     elif active_source == "phone_webcam":
         cam_source_tag = "PHONE"
-        video_time_str = time.strftime("%M:%S", time.localtime(cap_ts if 'cap_ts' in locals() else time.time()))
+        video_time_str = time.strftime("%M:%S", time.localtime())
     elif active_source == "jetson_camera":
         cam_source_tag = "JETSON / USB"
-        video_time_str = time.strftime("%M:%S", time.localtime(cap_ts if 'cap_ts' in locals() else time.time()))
+        video_time_str = time.strftime("%M:%S", time.localtime())
     elif active_source == "sim":
         cam_source_tag = "SIMULATOR"
         video_time_str = "00:00.00"
@@ -486,6 +495,8 @@ def _execute_ai_cycle() -> None:
             frame_index=frame_idx,
             total_frames=total_frames,
             video_time=video_time_str,
+            frame_age_ms=latency_ms,
+            is_stale=is_stale if 'is_stale' in locals() else False,
         )
         _state.last_result = result
 
@@ -535,29 +546,30 @@ def _execute_ai_cycle() -> None:
 
 
 # =========================================================================== #
-# High-Speed Live Streamer Loop (Async)
+# Dedicated High-Speed Live Streamer Worker (Threaded)
 # =========================================================================== #
-async def _streaming_loop() -> None:
+def _stream_producer_thread() -> None:
     """
-    Live streaming loop: runs at camera frame rate (~30 FPS).
-    Pulls newest frame from LatestFrameBuffer, draws latest cached AI overlays in <1ms,
-    and pushes to the MJPEG streamer with zero queue backlog.
+    Dedicated high-speed live streaming worker thread (25-30 FPS).
+    Offloaded from asyncio event loop so cv2.imencode() never blocks server I/O.
+    Pulls freshest frame from LatestFrameBuffer, draws latest cached AI overlays in <1ms,
+    and updates the MJPEG streamer.
     """
-    logger.info("ORBITA Live Streaming loop started.")
+    logger.info("ORBITA Live Streamer thread started.")
     while _state.is_running:
-        t0 = time.time()
+        t0 = time.monotonic()
         try:
-            await _stream_single_frame()
+            _produce_single_stream_frame()
         except Exception as exc:
-            logger.warning("Streaming loop error: %s", exc)
+            logger.warning("Streaming thread error: %s", exc)
 
         # Regulate to ~30 FPS target (0.033s)
-        elapsed = time.time() - t0
-        sleep_dur = max(0.005, 0.033 - elapsed)
-        await asyncio.sleep(sleep_dur)
+        elapsed = time.monotonic() - t0
+        sleep_dur = max(0.002, 0.033 - elapsed)
+        time.sleep(sleep_dur)
 
 
-async def _stream_single_frame() -> None:
+def _produce_single_stream_frame() -> None:
     active_source = _state.camera_manager.active_source if _state.camera_manager else _state.mode
     frame = None
     cam_latency_ms = 0.0
@@ -573,7 +585,7 @@ async def _stream_single_frame() -> None:
                 _show_camera_status_frame(cam_stat.get("status", ""), cam_stat.get("error"))
         return
 
-    t_now = time.time()
+    t_now = time.monotonic()
 
     # Retrieve latest cached AI annotations snapshot (instant non-blocking read)
     (
@@ -600,7 +612,7 @@ async def _stream_single_frame() -> None:
         latency_ms=cam_latency_ms,
     )
 
-    # Update streamer (event-driven dispatch to all connected viewers)
+    # Update streamer (thread-safe event-driven dispatch to all connected viewers)
     _state.streamer.update(annotated, timestamp=t_now)
 
     # Write to local recorder if active
@@ -612,11 +624,17 @@ async def _stream_single_frame() -> None:
 
     # Stream FPS tracking
     _state.frame_count += 1
-    elapsed = time.time() - _state._fps_timer
+    elapsed = time.monotonic() - _state._fps_timer
     if elapsed >= 1.0:
         _state.pipeline_fps = round(_state.frame_count / elapsed, 1)
         _state.frame_count = 0
-        _state._fps_timer = time.time()
+        _state._fps_timer = time.monotonic()
+
+
+async def _streaming_loop() -> None:
+    """Async no-op compatibility stub (streaming is now handled by _stream_producer_thread)."""
+    while _state.is_running:
+        await asyncio.sleep(1.0)
 
 
 # =========================================================================== #
@@ -778,10 +796,12 @@ async def video_feed():
 async def ws_telemetry(websocket: WebSocket):
     await _state.ws_manager.connect(websocket)
     try:
+        # Send initial snapshot immediately so client renders on connect
+        if _state.last_result:
+            await websocket.send_text(json.dumps(_state.last_result.to_dict()))
+        # Telemetry updates are broadcast event-driven via _state.ws_manager.broadcast()
         while True:
-            if _state.last_result:
-                await websocket.send_text(json.dumps(_state.last_result.to_dict()))
-            await asyncio.sleep(0.08)
+            await websocket.receive_text()
     except Exception:
         pass
     finally:
@@ -1052,12 +1072,18 @@ async def camera_diagnostics():
     cam_diag = _state.camera_manager.get_diagnostics() if _state.camera_manager else {}
     stream_diag = _state.streamer.get_diagnostics()
 
+    frame_age = cam_diag.get("frame_age_ms", cam_diag.get("latency_ms", 0.0))
+    live_edge = "LIVE" if frame_age < 250.0 else ("BEHIND" if frame_age < 1000.0 else "CRITICAL")
+
     return {
         "camera_fps": cam_diag.get("actual_fps", 0.0),
         "stream_fps": stream_diag.get("stream_fps", _state.pipeline_fps),
         "ai_fps": round(_state.ai_fps, 1),
         "pipeline_latency_ms": round(_state.total_pipeline_latency_ms, 1),
         "camera_latency_ms": cam_diag.get("latency_ms", 0.0),
+        "frame_age_ms": round(frame_age, 1),
+        "live_edge": cam_diag.get("live_edge", live_edge),
+        "queue_depth": cam_diag.get("queue_depth", 0),
         "encode_latency_ms": stream_diag.get("encode_latency_ms", 0.0),
         "dropped_frames_pct": cam_diag.get("dropped_pct", 0.0),
         "buffer_size": 1,
@@ -1087,6 +1113,9 @@ async def api_status():
     cam_diag = _state.camera_manager.get_diagnostics() if _state.camera_manager else {}
     is_cam_online = cam_info.get("connected", False) or (_state.mode == "sim")
 
+    frame_age = cam_diag.get("frame_age_ms", cam_info.get("latency_ms", 0.0))
+    live_edge = "LIVE" if frame_age < 250.0 else ("BEHIND" if frame_age < 1000.0 else "CRITICAL")
+
     return {
         "ai_engine": "ONLINE",
         "camera": "ONLINE" if is_cam_online else "OFFLINE",
@@ -1096,6 +1125,8 @@ async def api_status():
         "stream_fps": round(_state.pipeline_fps, 1),
         "ai_fps": round(_state.ai_fps, 1),
         "camera_latency_ms": cam_info.get("latency_ms", 0.0),
+        "frame_age_ms": round(frame_age, 1),
+        "live_edge": cam_diag.get("live_edge", live_edge),
         "pipeline_latency_ms": round(_state.total_pipeline_latency_ms, 1),
         "dropped_frames_pct": cam_diag.get("dropped_pct", 0.0),
         "tts": "ONLINE" if (_state.tts and _state.tts.is_available()) else "OFFLINE",

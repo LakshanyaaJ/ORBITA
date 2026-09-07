@@ -34,7 +34,7 @@ class MJPEGStreamer:
 
     def __init__(self, jpeg_quality: int = 70):
         self.jpeg_quality = jpeg_quality
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
         self._latest_jpeg: Optional[bytes] = None
         self._latest_frame_id: int = 0
@@ -49,8 +49,8 @@ class MJPEGStreamer:
         self._stream_frame_count: int = 0
         self._fps_timer: float = time.time()
 
-        # Event notification for async streaming generators
-        self._new_frame_events: Set[asyncio.Event] = set()
+        # Event notification for async streaming generators across threads
+        self._new_frame_events: Set[Tuple[asyncio.AbstractEventLoop, asyncio.Event]] = set()
         self._client_count: int = 0
 
     @property
@@ -65,6 +65,13 @@ class MJPEGStreamer:
     def encode_latency_ms(self) -> float:
         return self._encode_latency_ms
 
+    @property
+    def frame_age_ms(self) -> float:
+        with self._lock:
+            if not self._latest_timestamp:
+                return 0.0
+            return max(0.0, (time.monotonic() - self._latest_timestamp) * 1000.0)
+
     def update(self, frame: np.ndarray, timestamp: Optional[float] = None) -> None:
         """
         Compress and update the latest frame (thread-safe).
@@ -73,7 +80,7 @@ class MJPEGStreamer:
         if frame is None or frame.size == 0:
             return
 
-        t0 = time.time()
+        t0 = time.monotonic()
 
         # Fast JPEG encoding: OPTIMIZE=0 disables multi-pass Huffman for minimum CPU overhead
         encode_params = [
@@ -85,26 +92,30 @@ class MJPEGStreamer:
             return
 
         encoded_bytes = buf.tobytes()
-        t_enc = (time.time() - t0) * 1000.0
+        t_enc = (time.monotonic() - t0) * 1000.0
 
         with self._lock:
             self._latest_jpeg = encoded_bytes
             self._latest_frame_id += 1
-            self._latest_timestamp = timestamp or time.time()
+            self._latest_timestamp = timestamp if timestamp is not None else time.monotonic()
             self._encode_latency_ms = round(t_enc, 2)
 
             # Stream FPS counter
             self._stream_frame_count += 1
-            now = time.time()
+            now = time.monotonic()
             elapsed = now - self._fps_timer
             if elapsed >= 1.0:
                 self._stream_fps = round(self._stream_frame_count / elapsed, 1)
                 self._stream_frame_count = 0
                 self._fps_timer = now
 
-            # Wake up all waiting async streaming generators
-            for event in list(self._new_frame_events):
-                event.set()
+            # Wake up all waiting async streaming generators thread-safely
+            for loop, event in list(self._new_frame_events):
+                try:
+                    if not loop.is_closed():
+                        loop.call_soon_threadsafe(event.set)
+                except Exception:
+                    pass
 
     def get_latest_jpeg(self) -> bytes:
         """Get latest JPEG bytes."""
@@ -116,9 +127,11 @@ class MJPEGStreamer:
         Async generator for FastAPI StreamingResponse.
         Drops stale frames automatically if client is slow.
         """
+        loop = asyncio.get_running_loop()
         event = asyncio.Event()
+        entry = (loop, event)
         with self._lock:
-            self._new_frame_events.add(event)
+            self._new_frame_events.add(entry)
             self._client_count += 1
 
         last_sent_frame_id = -1
@@ -127,9 +140,9 @@ class MJPEGStreamer:
 
         try:
             while True:
-                # Wait for next frame or brief timeout (max 100ms)
+                # Wait for next frame or brief timeout (max 60ms)
                 try:
-                    await asyncio.wait_for(event.wait(), timeout=0.08)
+                    await asyncio.wait_for(event.wait(), timeout=0.06)
                 except asyncio.TimeoutError:
                     pass
                 finally:
@@ -144,12 +157,12 @@ class MJPEGStreamer:
                     last_sent_frame_id = current_id
                     yield boundary_header + frame_bytes + boundary_footer
 
-                # Tiny yield to allow event loop cooperative scheduling without throttle
+                # Cooperative scheduling yield
                 await asyncio.sleep(0.001)
 
         finally:
             with self._lock:
-                self._new_frame_events.discard(event)
+                self._new_frame_events.discard(entry)
                 self._client_count = max(0, self._client_count - 1)
 
     def get_diagnostics(self) -> Dict[str, float]:
@@ -158,9 +171,11 @@ class MJPEGStreamer:
             return {
                 "stream_fps": self._stream_fps,
                 "encode_latency_ms": self._encode_latency_ms,
+                "frame_age_ms": round(self.frame_age_ms, 1),
                 "active_clients": self._client_count,
                 "jpeg_quality": self.jpeg_quality,
             }
+
 
     @staticmethod
     def _make_blank_jpeg() -> bytes:

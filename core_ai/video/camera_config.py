@@ -34,6 +34,8 @@ class IPCameraConfig:
     prefer_hardware_acceleration: bool = True
     low_latency: bool = True
     ai_fps: int = 15
+    max_stale_frame_ms: float = 500.0
+    drain_burst_threshold: int = 5
 
 
 def get_default_ip_camera_url() -> str:
