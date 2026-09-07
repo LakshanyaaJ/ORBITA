@@ -129,6 +129,7 @@ class IPCamera:
         self._last_frame_time: float = 0.0
 
         self._lock = threading.Lock()
+        self.rotation: int = getattr(config, "rotation", -1)  # -1 = auto-horizontal
 
     @property
     def frame_buffer(self) -> LatestFrameBuffer:
@@ -317,11 +318,25 @@ class IPCamera:
             self._status = "connected"
             self._last_frame_time = time.time()
 
-            # Resize if dimensions specified and different
+            # Apply orientation transformation: guarantee horizontal landscape view
+            fh, fw = frame.shape[:2]
+            rot = getattr(self, "rotation", -1)
+            if rot == 90 or (rot == -1 and fh > fw):
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            elif rot == 180:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
+            elif rot == 270:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+            # Preserve aspect ratio: scale proportionally if frame exceeds configured dimensions
             fh, fw = frame.shape[:2]
             target_w, target_h = self.config.width, self.config.height
-            if (target_w > 0 and target_h > 0) and (fw != target_w or fh != target_h):
-                frame = cv2.resize(frame, (target_w, target_h))
+            if (target_w > 0 and target_h > 0) and (fw > target_w or fh > target_h):
+                scale = min(target_w / fw, target_h / fh)
+                new_w = max(1, int(round(fw * scale)))
+                new_h = max(1, int(round(fh * scale)))
+                if new_w != fw or new_h != fh:
+                    frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
             # Push newest frame to LatestFrameBuffer (drops stale frame instantly)
             self._frame_buffer.push(frame, t_capture)

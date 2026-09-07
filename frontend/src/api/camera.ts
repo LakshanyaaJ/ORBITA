@@ -13,6 +13,7 @@ export interface CameraStatus {
   latency_ms: number;
   status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' | 'waiting' | 'error';
   error?: string | null;
+  rotation?: number;
 }
 
 export interface CameraDiagnostics {
@@ -32,11 +33,21 @@ export interface CameraDiagnostics {
   mem_pct: number;
 }
 
+export interface AvailableNetworkInterface {
+  interface: string;
+  ip: string;
+  is_default: boolean;
+}
+
 export interface PhonePairingInfo {
   pairing_token: string;
   lan_ip: string;
   port: number;
+  https_port?: number;
   connection_url: string;
+  https_url?: string;
+  http_url?: string;
+  available_ips?: AvailableNetworkInterface[];
   connected: boolean;
   fps: number;
   latency_ms: number;
@@ -145,3 +156,18 @@ export async function disconnectCamera(): Promise<{ success: boolean; error?: st
     return { success: false, error: err?.message || 'Network error on disconnect' };
   }
 }
+
+export async function rotateCamera(degrees: number = 90): Promise<{ success: boolean; rotation: number }> {
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/camera/rotate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ degrees }),
+    });
+    if (!res.ok) return { success: false, rotation: 0 };
+    return await res.json();
+  } catch {
+    return { success: false, rotation: 0 };
+  }
+}
+

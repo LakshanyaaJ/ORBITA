@@ -10,10 +10,11 @@ import {
   HelpCircle, 
   Cpu, 
   ArrowRight, 
-  ChevronRight
+  ChevronRight,
+  RotateCw
 } from 'lucide-react';
 import CameraControlPanel from '../components/camera/CameraControlPanel';
-import type { CameraStatus } from '../api/camera';
+import { rotateCamera, type CameraStatus } from '../api/camera';
 
 // Standard experiment protocol steps for full timeline rendering
 const DEFAULT_PROTOCOL_STEPS = [
@@ -34,6 +35,14 @@ export default function LiveExperiment() {
   const [streamVersion, setStreamVersion] = useState(Date.now());
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
   const [isDebugMode, setIsDebugMode] = useState(false);
+  const [rotation, setRotation] = useState<number>(0);
+
+  const handleRotate = async () => {
+    const next = (rotation + 90) % 360;
+    setRotation(next);
+    setStreamVersion(Date.now());
+    await rotateCamera(next);
+  };
 
   const state = data || getFallbackState(id || 'EXP-01');
 
@@ -127,6 +136,19 @@ export default function LiveExperiment() {
           {/* Top-right mode toggles */}
           <div className="absolute top-3 right-4 z-10 flex items-center gap-2">
             <button
+              onClick={handleRotate}
+              className={clsx(
+                "px-2.5 py-1 rounded font-mono text-xs font-bold tracking-wider flex items-center gap-1.5 transition-all border shadow",
+                rotation > 0
+                  ? "bg-accent-cyan text-black border-accent-cyan"
+                  : "bg-space-900/80 hover:bg-space-800 text-space-300 border-space-700"
+              )}
+              title="Rotate Camera Stream 90° (Switch Portrait / Horizontal View)"
+            >
+              <RotateCw size={13} />
+              <span>{rotation > 0 ? `${rotation}°` : 'ROTATE'}</span>
+            </button>
+            <button
               onClick={() => setIsDebugMode(!isDebugMode)}
               className={clsx(
                 "px-3 py-1 rounded font-mono text-xs font-bold tracking-wider flex items-center gap-1.5 transition-all border shadow",
@@ -140,14 +162,34 @@ export default function LiveExperiment() {
             </button>
           </div>
 
-          {/* Center MJPEG Live Stream Canvas */}
-          <div className="flex-1 relative flex items-center justify-center overflow-hidden bg-space-950">
+          {/* Center MJPEG Live Stream Viewport */}
+          <div 
+            className="camera-container flex-1 relative flex items-center justify-center overflow-hidden bg-black"
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+              backgroundColor: "#000000",
+            }}
+          >
             {!videoError ? (
               <img 
                 key={streamVersion}
                 src={`http://localhost:8000/video_feed?v=${streamVersion}`} 
                 alt="Live Camera Feed"
                 className="w-full h-full object-contain"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  maxWidth: "100%",
+                  maxHeight: "100%",
+                  objectFit: "contain",
+                  objectPosition: "center",
+                  display: "block",
+                }}
                 onError={() => setVideoError(true)}
               />
             ) : (

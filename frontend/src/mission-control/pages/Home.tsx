@@ -195,8 +195,12 @@ function CameraFeed({
             style={{
               width: "100%",
               height: "100%",
+              maxWidth: "100%",
+              maxHeight: "100%",
               objectFit: "contain",
-              backgroundColor: "#0d1b22",
+              objectPosition: "center",
+              display: "block",
+              backgroundColor: "#000000",
               position: "absolute",
               inset: 0,
               zIndex: 1,

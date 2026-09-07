@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_lan_ip() -> str:
-    """Detect local LAN IP address of the Jetson or host machine."""
+    """Detect primary local LAN IP address of the Jetson or host machine."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.settimeout(0.2)
@@ -42,6 +42,58 @@ def get_lan_ip() -> str:
     finally:
         s.close()
     return ip
+
+
+def get_all_lan_ips() -> list[dict[str, Any]]:
+    """
+    Detect all active IPv4 addresses across network interfaces (Wi-Fi, Ethernet, Hotspots).
+    Returns list of {'interface': str, 'ip': str, 'is_default': bool}.
+    """
+    default_ip = get_lan_ip()
+    interfaces: list[dict[str, Any]] = []
+    seen_ips = set()
+
+    try:
+        import psutil
+        stats = psutil.net_if_stats()
+        addrs = psutil.net_if_addrs()
+
+        for iface_name, addr_list in addrs.items():
+            st = stats.get(iface_name)
+            if st and not st.isup:
+                continue
+            for a in addr_list:
+                if a.family == socket.AF_INET:
+                    ip = a.address
+                    if ip.startswith("127.") or ip.startswith("169.254."):
+                        continue
+                    if ip not in seen_ips:
+                        seen_ips.add(ip)
+                        interfaces.append({
+                            "interface": iface_name,
+                            "ip": ip,
+                            "is_default": (ip == default_ip),
+                        })
+    except Exception as e:
+        logger.warning("Could not enumerate network interfaces via psutil: %s", e)
+
+    # Ensure default IP is always present
+    if default_ip and default_ip != "127.0.0.1" and default_ip not in seen_ips:
+        interfaces.insert(0, {
+            "interface": "Primary LAN",
+            "ip": default_ip,
+            "is_default": True,
+        })
+        seen_ips.add(default_ip)
+
+    # Fallback / localhost option
+    interfaces.append({
+        "interface": "Localhost",
+        "ip": "127.0.0.1",
+        "is_default": (default_ip == "127.0.0.1"),
+    })
+
+    return interfaces
 
 
 class PhoneStreamReceiver:
@@ -59,6 +111,7 @@ class PhoneStreamReceiver:
         self._token_created_at: float = time.time()
         self._connected: bool = False
         self._device_info: Dict[str, Any] = {}
+        self.rotation: int = -1  # -1 = auto-horizontal (rotates portrait frames to landscape)
 
         # Telemetry
         self._actual_fps: float = 0.0
@@ -113,6 +166,7 @@ class PhoneStreamReceiver:
     def get_connection_info(self) -> Dict[str, Any]:
         """Return pairing metadata for QR code and manual connection."""
         lan_ip = get_lan_ip()
+        available_ips = get_all_lan_ips()
         https_port = 8443
         with self._lock:
             # HTTPS Secure Context is required by mobile browsers for getUserMedia
@@ -126,6 +180,7 @@ class PhoneStreamReceiver:
                 "connection_url": https_url,
                 "https_url": https_url,
                 "http_url": http_url,
+                "available_ips": available_ips,
                 "connected": self.is_connected,
                 "fps": self._actual_fps,
                 "latency_ms": round(self.latency_ms, 1),
@@ -165,6 +220,16 @@ class PhoneStreamReceiver:
 
         if frame is None or frame.size == 0:
             return False
+
+        # Apply orientation transformation: guarantee horizontal landscape view
+        fh, fw = frame.shape[:2]
+        rot = getattr(self, "rotation", -1)
+        if rot == 90 or (rot == -1 and fh > fw):
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        elif rot == 180:
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+        elif rot == 270:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
         with self._lock:
             self._connected = True

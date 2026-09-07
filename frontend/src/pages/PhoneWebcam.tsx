@@ -39,6 +39,12 @@ export default function PhoneWebcam() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [maxZoom, setMaxZoom] = useState(1);
   const [wakeLockActive, setWakeLockActive] = useState(false);
+  const [rotation, setRotation] = useState<number>(0); // 0, 90, 180, 270 degrees
+
+  const rotationRef = useRef<number>(0);
+  useEffect(() => {
+    rotationRef.current = rotation;
+  }, [rotation]);
 
   // Telemetry metrics
   const [actualFps, setActualFps] = useState<number>(0);
@@ -318,11 +324,39 @@ export default function PhoneWebcam() {
       const video = videoRef.current;
       if (video.videoWidth === 0 || video.videoHeight === 0) return;
 
-      canvas.width = resolution.width;
-      canvas.height = resolution.height;
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const maxW = resolution.width;
+      const maxH = resolution.height;
 
-      // Draw current video frame to canvas
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const rot = rotationRef.current;
+      const isRotated = rot === 90 || rot === 270;
+
+      // Calculate proportional scale strictly preserving the source camera aspect ratio
+      const scale = Math.min(
+        maxW / (isRotated ? vh : vw),
+        maxH / (isRotated ? vw : vh),
+        1.0
+      );
+      const targetW = Math.round(vw * scale);
+      const targetH = Math.round(vh * scale);
+
+      const canvasW = isRotated ? targetH : targetW;
+      const canvasH = isRotated ? targetW : targetH;
+
+      if (canvas.width !== canvasW) canvas.width = canvasW;
+      if (canvas.height !== canvasH) canvas.height = canvasH;
+
+      // Draw video frame to canvas with optional orientation rotation
+      if (rot !== 0) {
+        ctx.save();
+        ctx.translate(canvasW / 2, canvasH / 2);
+        ctx.rotate((rot * Math.PI) / 180);
+        ctx.drawImage(video, -targetW / 2, -targetH / 2, targetW, targetH);
+        ctx.restore();
+      } else {
+        ctx.drawImage(video, 0, 0, targetW, targetH);
+      }
 
       isTransmittingRef.current = true;
       // Fast JPEG compression (quality 0.70 is ideal for 720p low latency)
@@ -490,7 +524,7 @@ export default function PhoneWebcam() {
 
               {/* Resolution & FPS Badge */}
               <div className="absolute top-2 left-2 bg-space-950/70 backdrop-blur px-2 py-0.5 rounded text-[10px] font-mono text-space-300 border border-space-700 pointer-events-none">
-                {resolution.label} · {targetFps} FPS · {facingMode === 'environment' ? 'REAR' : 'FRONT'}
+                {resolution.label} · {targetFps} FPS · {facingMode === 'environment' ? 'REAR' : 'FRONT'}{rotation > 0 ? ` · ROT ${rotation}°` : ''}
               </div>
 
               {/* Torch & Flip Quick Controls Overlay */}
@@ -512,11 +546,25 @@ export default function PhoneWebcam() {
                 )}
                 <button
                   type="button"
+                  onClick={() => setRotation((prev) => (prev + 90) % 360)}
+                  className={clsx(
+                    "p-2 rounded-full border backdrop-blur text-xs transition-colors flex items-center gap-1",
+                    rotation > 0
+                      ? "bg-accent-cyan text-space-950 border-accent-cyan shadow-[0_0_8px_#2f6f9f]"
+                      : "bg-space-900/80 text-space-300 border-space-700"
+                  )}
+                  title="Rotate Stream 90° (Switch Portrait / Horizontal Landscape)"
+                >
+                  <RotateCw size={15} className={rotation > 0 ? "text-space-950" : ""} />
+                  {rotation > 0 && <span className="font-mono text-[10px] font-bold">{rotation}°</span>}
+                </button>
+                <button
+                  type="button"
                   onClick={toggleFacingMode}
                   className="p-2 rounded-full bg-space-900/80 border border-space-700 text-space-300 backdrop-blur text-xs active:rotate-180 transition-transform"
                   title="Switch Front/Rear Camera"
                 >
-                  <RotateCw size={15} />
+                  <RefreshCw size={15} />
                 </button>
               </div>
             </>

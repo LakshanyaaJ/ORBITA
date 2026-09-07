@@ -57,6 +57,7 @@ class CameraManager:
         self._lock = threading.Lock()
         self._status: str = "disconnected"
         self._last_error: Optional[str] = None
+        self._rotation: int = -1  # -1 = auto-horizontal (guarantees horizontal view), 0, 90, 180, 270
 
     @property
     def active_source(self) -> str:
@@ -69,6 +70,23 @@ class CameraManager:
     @property
     def phone_receiver(self) -> PhoneStreamReceiver:
         return self._phone_receiver
+
+    @property
+    def rotation(self) -> int:
+        return self._rotation
+
+    def set_rotation(self, degrees: int) -> int:
+        """Set camera rotation: 0, 90, 180, 270, or -1 (auto-horizontal)."""
+        with self._lock:
+            self._rotation = degrees
+            if self._phone_receiver:
+                self._phone_receiver.rotation = degrees
+            if self._ip_camera:
+                self._ip_camera.rotation = degrees
+            if self._jetson_camera:
+                self._jetson_camera.rotation = degrees
+            logger.info("CameraManager: rotation set to %d", degrees)
+            return self._rotation
 
     def get_frame_buffer(self) -> LatestFrameBuffer:
         """Return the active frame buffer for non-blocking multi-consumer reads."""
@@ -121,6 +139,7 @@ class CameraManager:
                 "latency_ms": round(latency_ms, 1),
                 "status": status,
                 "error": error if error else None,
+                "rotation": self._rotation,
             }
 
     def get_diagnostics(self) -> Dict[str, Any]:

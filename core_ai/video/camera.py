@@ -46,6 +46,7 @@ class Camera:
         self.height = getattr(config, "height", 720)
         self.fps_target = getattr(config, "fps", 30)
         self.flip = getattr(config, "flip", False)
+        self.rotation = getattr(config, "rotation", -1)  # -1 = auto-horizontal
 
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame_buffer = LatestFrameBuffer(name="local-cam-buffer")
@@ -170,10 +171,24 @@ class Camera:
             if self.flip:
                 frame = cv2.flip(frame, 1)
 
-            # Resize if needed
+            # Apply orientation transformation: guarantee horizontal landscape view
             fh, fw = frame.shape[:2]
-            if fw != self.width or fh != self.height:
-                frame = cv2.resize(frame, (self.width, self.height))
+            rot = getattr(self, "rotation", -1)
+            if rot == 90 or (rot == -1 and fh > fw):
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            elif rot == 180:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
+            elif rot == 270:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+            # Preserve aspect ratio: scale proportionally if frame exceeds configured dimensions
+            fh, fw = frame.shape[:2]
+            if self.width > 0 and self.height > 0 and (fw > self.width or fh > self.height):
+                scale = min(self.width / fw, self.height / fh)
+                new_w = max(1, int(round(fw * scale)))
+                new_h = max(1, int(round(fh * scale)))
+                if new_w != fw or new_h != fh:
+                    frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
             # Store in LatestFrameBuffer (drops old frame instantly)
             self._frame_buffer.push(frame, t0)

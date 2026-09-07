@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import psutil
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -975,7 +975,19 @@ async def camera_status():
         "latency_ms": 0.0,
         "status": "disconnected",
         "error": None,
+        "rotation": -1,
     }
+
+
+@app.post("/api/camera/rotate")
+async def api_camera_rotate(body: Optional[dict] = Body(default=None)):
+    """Set camera rotation: 0, 90, 180, 270, or -1 (auto-horizontal)."""
+    degrees = int((body or {}).get("degrees", 90))
+    if _state.camera_manager:
+        current_rot = _state.camera_manager.set_rotation(degrees)
+        return {"success": True, "rotation": current_rot}
+    return {"success": False, "rotation": 0}
+
 
 
 @app.get("/api/camera/diagnostics")
