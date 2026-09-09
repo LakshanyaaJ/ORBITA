@@ -48,26 +48,29 @@ class CameraConfig:
 # --------------------------------------------------------------------------- #
 @dataclass
 class DetectionConfig:
-    # Object classes the system handles (must match simulator & YOLO labels)
+    # Object classes the system handles (7 canonical ORBITA experiment entities)
     classes: list[str] = field(default_factory=lambda: [
-        "PERSON", "MAIN_BOX", "RED_BOX", "YELLOW_BOX",
-        "SAMPLE", "TOOL", "CHAMBER"
+        "LOCATION_A", "LOCATION_B", "PEN", "WATCH",
+        "BLUE_BOX", "YELLOW_BOX", "HAND"
     ])
 
-    # HSV colour ranges for the fallback chroma detector
+    # HSV colour ranges for secondary color validation only
     # Format: [H_low, S_low, V_low, H_high, S_high, V_high]
     color_ranges: dict[str, list[int]] = field(default_factory=lambda: {
-        "RED_BOX":    [0, 120, 80, 10, 255, 255],     # Red hue
-        "YELLOW_BOX": [20, 120, 80, 35, 255, 255],    # Yellow hue
-        "MAIN_BOX":   [100, 30, 30, 140, 255, 200],   # Blue-grey
-        "SAMPLE":     [60, 80, 80, 90, 255, 255],      # Green
+        "YELLOW_BOX": [18, 90, 70, 38, 255, 255],     # Yellow hue
+        "BLUE_BOX":   [90, 80, 50, 135, 255, 255],    # Blue hue
     })
 
-    yolo_model_path: str = str(MODELS_DIR / "orbita_yolo_detector_v3.pt") if (MODELS_DIR / "orbita_yolo_detector_v3.pt").exists() else str(MODELS_DIR / "yolov8n.pt")
-    use_yolo: bool = True           # Falls back to chroma-only if False or model absent
-    confidence_threshold: float = 0.35
+    yolo_model_path: str = (
+        str(MODELS_DIR / "orbita_yolo_detector_v4.pt") if (MODELS_DIR / "orbita_yolo_detector_v4.pt").exists()
+        else (str(MODELS_DIR / "orbita_yolo_detector_v3.pt") if (MODELS_DIR / "orbita_yolo_detector_v3.pt").exists()
+        else str(MODELS_DIR / "yolov8n.pt"))
+    )
+    use_yolo: bool = True           # Primary neural detector
+    confidence_threshold: float = 0.25
     min_area_px: int = 400          # Ignore tiny detections
-    yolo_imgsz: int = 480
+    yolo_imgsz: int = 640
+    allow_chroma_fallback: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -126,7 +129,7 @@ class VoiceConfig:
     enabled: bool = True
     rate: int = 175                 # Words per minute
     volume: float = 0.95
-    voice_id: str | None = None     # None = OS default; set to a specific voice ID
+    voice_id: str | None = "female" # "female", "zira", "hazel", or specific voice ID
 
 
 # --------------------------------------------------------------------------- #

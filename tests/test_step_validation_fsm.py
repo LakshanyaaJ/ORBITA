@@ -286,3 +286,71 @@ def test_complete_deterministic_13_step_advancement(config, caplog):
     assert res.fsm_state.status == FSMStatus.COMPLETED
     assert len(spoken) == 13
     assert "Experiment complete" in spoken[-1]
+
+
+def test_section_15_test_cases(config):
+    """
+    Explicit verification of the 7 test cases from Section 15 of Master Prompt:
+    TEST 1: Expected: IDENTIFY_BLUE_BOX, Detected: IDENTIFY + BLUE_BOX -> PASS -> Step 2
+    TEST 2: Expected: IDENTIFY_BLUE_BOX, Detected: IDENTIFY + YELLOW_BOX -> FAIL -> remain Step 1
+    TEST 3: Expected: IDENTIFY_BLUE_BOX, Detected: NO BLUE_BOX -> WAIT -> remain Step 1
+    TEST 4: Expected: IDENTIFY_BLUE_BOX, Detected: BLUE_BOX for only one noisy frame -> WAIT
+    TEST 5: Expected: IDENTIFY_BLUE_BOX, Detected: BLUE_BOX for required confirmation window -> PASS -> Step 2
+    TEST 6: After Step 1 completion, verify that the system cannot complete Step 1 repeatedly
+    TEST 7: Verify page refresh/state synchronization
+    """
+    from core_ai.reasoning.action_gate import validateStep, normalize_step, normalize_detection
+
+    # TEST 1 & 5: validateStep contract & temporal confirmation
+    current_step = {"id": 1, "expected_action": "IDENTIFY_BLUE_BOX", "expected_object": "BLUE_BOX"}
+    det_valid = {"action": "IDENTIFY", "object": "BLUE_BOX", "confidence": 0.95}
+    v1 = validateStep(current_step, det_valid)
+    assert v1["valid"] is True
+    assert v1["actionMatch"] is True
+    assert v1["targetMatch"] is True
+    assert v1["confidencePass"] is True
+
+    # TEST 2: Expected BLUE_BOX, Detected YELLOW_BOX -> FAIL
+    det_wrong = {"action": "IDENTIFY", "object": "YELLOW_BOX", "confidence": 0.90}
+    v2 = validateStep(current_step, det_wrong)
+    assert v2["valid"] is False
+    assert v2["targetMatch"] is False
+
+    # TEST 3: Expected BLUE_BOX, Detected NO BLUE_BOX -> WAIT
+    det_empty = {"action": "IDLE", "object": "", "confidence": 0.0}
+    v3 = validateStep(current_step, det_empty)
+    assert v3["valid"] is False
+
+    # Runtime FSM temporal tests
+    blue_obj = DetectedObject(class_name="BLUE_BOX", confidence=0.92, bbox=(100, 100, 80, 80), centroid=(140, 140), source="yolo", semantic_identity="BLUE_BOX")
+    pred_identify = ActionPrediction(action="IDENTIFY", confidence=0.92, next_action="IDLE", next_confidence=0.2, is_uncertain=False, target_object="BLUE_BOX")
+
+    manager = StateManager(config, experiment_id="EXP_TEST_15")
+    manager.reset()
+
+    # TEST 4: Single noisy frame -> WAIT
+    res_f1 = manager.process(pred_identify, detected_objects=[blue_obj])
+    assert res_f1.fsm_state.current_step_idx == 0
+    assert res_f1.confirmed_action.status == ActionGateStatus.WAITING
+
+    # TEST 5: Maintain for confirmation window (3 frames) -> PASS -> Step 2
+    manager.process(pred_identify, detected_objects=[blue_obj])
+    res_f3 = manager.process(pred_identify, detected_objects=[blue_obj])
+    assert res_f3.confirmed_action.status == ActionGateStatus.CONFIRMED_CORRECT
+    assert res_f3.fsm_state.current_step_idx == 1  # Step 2 active!
+    assert res_f3.fsm_state.completed_step_ids == [1]
+
+    # TEST 6: Cannot complete Step 1 repeatedly (Idempotency Guard)
+    res_f4 = manager.process(pred_identify, detected_objects=[blue_obj])
+    assert res_f4.fsm_state.current_step_idx == 1  # Stays on Step 2, does not advance or duplicate
+    assert res_f4.fsm_state.completed_step_ids == [1]
+
+    # TEST 7: Authoritative state snapshot matches and is synchronized
+    d = res_f3.to_dict()
+    assert d["current_step_idx"] == 1
+    assert d["completed_steps"] == [1]
+    assert d["status"] in ("CORRECT", "WAITING")
+    assert "validation_debug" in d
+    assert d["validation_debug"]["actionMatch"] is True
+    assert d["validation_debug"]["targetMatch"] is True
+

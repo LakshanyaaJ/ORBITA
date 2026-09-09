@@ -35,6 +35,7 @@
   "voice": {
     "enabled": true,
     "rate": 160,
-    "volume": 1.0
+    "volume": 1.0,
+    "voice_id": "female"
   }
 }

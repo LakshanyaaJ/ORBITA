@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Camera, Brain, Database, Mic, Video } from 'lucide-react';
+import { Camera, Brain, Database, Mic, Video, Volume2 } from 'lucide-react';
 import { getCameraStatus } from '../api/camera';
 
 export default function SystemDiagnostics() {
@@ -59,6 +59,28 @@ export default function SystemDiagnostics() {
     }
   };
 
+  const handleTestAudio = async () => {
+    const text = "ORBITA voice diagnostics passed. Text to speech is operational.";
+    try {
+      await fetch('http://localhost:8000/api/voice/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+    } catch (e) {
+      console.warn('Backend speak error:', e);
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        window.speechSynthesis.speak(u);
+      } catch (e) {
+        console.warn('Browser speechSynthesis error:', e);
+      }
+    }
+  };
+
   return (
     <div className="p-8 max-w-6xl mx-auto h-full flex flex-col">
       <h1 className="text-2xl font-bold font-mono tracking-widest text-space-100 mb-8 border-b border-space-600 pb-4">
@@ -76,7 +98,18 @@ export default function SystemDiagnostics() {
             />
             <DiagnosticRow icon={<Brain />} label="AI INFERENCE ENGINE" state={status.ai_engine} />
             <DiagnosticRow icon={<Database />} label="STORAGE SUBSYSTEM" state={status.storage} />
-            <DiagnosticRow icon={<Mic />} label="VOICE ENGINE" state={status.tts} />
+            <div className="flex items-center justify-between">
+              <DiagnosticRow icon={<Mic />} label="VOICE ENGINE" state={status.tts} />
+              <button
+                type="button"
+                onClick={handleTestAudio}
+                className="px-2.5 py-1 text-xs rounded bg-space-700 hover:bg-space-600 text-accent-cyan border border-accent-cyan/40 flex items-center gap-1.5 font-mono transition-colors"
+                title="Test Voice Output"
+              >
+                <Volume2 size={12} />
+                Test Voice
+              </button>
+            </div>
             <DiagnosticRow icon={<Video />} label="VIDEO STREAM" state={status.stream} />
           </div>
         </section>

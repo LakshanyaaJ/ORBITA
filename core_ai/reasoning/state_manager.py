@@ -53,6 +53,9 @@ class ValidationResult:
     tracks: list[Any] = field(default_factory=list)
     frame_age_ms: float = 0.0
     is_stale: bool = False
+    raw_detections: Optional[list] = None
+    nms_detections: Optional[list] = None
+    grouped_detections: Optional[dict] = None
 
     def to_dict(self) -> dict:
         d = self.fsm_state.to_dict()
@@ -68,8 +71,55 @@ class ValidationResult:
         d["steps"] = self.steps
         val_state = getattr(self.confirmed_action, "validation_state", self.confirmed_action.status.value) if self.confirmed_action else "WAITING"
         val_reason = getattr(self.confirmed_action, "validation_reason", "") if self.confirmed_action else ""
+        checklist = getattr(self.confirmed_action, "why_completed_checklist", []) if self.confirmed_action else []
+        features = getattr(self.confirmed_action, "interaction_features", {}) if self.confirmed_action else {}
+        step_conf = round(getattr(self.confirmed_action, "step_confidence", 0.0), 3) if self.confirmed_action else 0.0
+
+        scores = {
+            "object_confidence": round(getattr(self.confirmed_action, "object_confidence", 0.0), 3) if self.confirmed_action else 0.0,
+            "hand_confidence": round(getattr(self.confirmed_action, "hand_confidence", 0.0), 3) if self.confirmed_action else 0.0,
+            "tracking_confidence": round(getattr(self.confirmed_action, "tracking_confidence", 0.0), 3) if self.confirmed_action else 0.0,
+            "interaction_confidence": round(getattr(self.confirmed_action, "interaction_confidence", 0.0), 3) if self.confirmed_action else 0.0,
+            "action_confidence": round(getattr(self.confirmed_action, "action_confidence", 0.0), 3) if self.confirmed_action else 0.0,
+            "step_confidence": step_conf,
+        }
+
         d["validation_state"] = val_state
         d["validation_reason"] = val_reason
+        d["why_completed_checklist"] = checklist
+        d["interaction_features"] = features
+        d["confidence_scores"] = scores
+        d["step_confidence"] = step_conf
+
+        v_debug = getattr(self.confirmed_action, "validation_debug", {}) if self.confirmed_action else {}
+        d["validation_debug"] = v_debug
+
+        grp = self.grouped_detections or {}
+        d["detections"] = {
+            "LOCATION_A": grp.get("LOCATION_A", []),
+            "LOCATION_B": grp.get("LOCATION_B", []),
+            "PEN": grp.get("PEN", []),
+            "WATCH": grp.get("WATCH", []),
+            "BLUE_BOX": grp.get("BLUE_BOX", []),
+            "YELLOW_BOX": grp.get("YELLOW_BOX", []),
+            "HAND": grp.get("HAND", []),
+            "location_a": grp.get("LOCATION_A", []),
+            "location_b": grp.get("LOCATION_B", []),
+            "pen": grp.get("PEN", []),
+            "watch": grp.get("WATCH", []),
+            "blue_box": grp.get("BLUE_BOX", []),
+            "yellow_box": grp.get("YELLOW_BOX", []),
+            "hand": grp.get("HAND", []),
+        }
+        d["structured_detections"] = {
+            "LOCATION_A": grp.get("LOCATION_A", []),
+            "LOCATION_B": grp.get("LOCATION_B", []),
+            "PEN": grp.get("PEN", []),
+            "WATCH": grp.get("WATCH", []),
+            "BLUE_BOX": grp.get("BLUE_BOX", []),
+            "YELLOW_BOX": grp.get("YELLOW_BOX", []),
+            "HAND": grp.get("HAND", []),
+        }
 
         if self.confirmed_action:
             d["confirmed_action"] = {
@@ -80,6 +130,10 @@ class ValidationResult:
                 "confidence": round(self.confirmed_action.confidence, 3),
                 "validation_state": val_state,
                 "validation_reason": val_reason,
+                "why_completed_checklist": checklist,
+                "interaction_features": features,
+                "confidence_scores": scores,
+                "validation_debug": v_debug,
             }
         
         # Section 20 SIH Development/Debug Telemetry Panel Block
@@ -99,10 +153,135 @@ class ValidationResult:
             "action_status": self.confirmed_action.status.value if self.confirmed_action else "WAITING",
             "validation_state": val_state,
             "validation_reason": val_reason,
+            "why_completed_checklist": checklist,
+            "interaction_features": features,
+            "confidence_scores": scores,
+            "step_confidence": step_conf,
             "fsm_step": f"STEP {self.fsm_state.current_step.id}: {self.fsm_state.current_step.label}" if self.fsm_state.current_step else ("COMPLETED" if self.fsm_state.is_complete else "NONE"),
             "fsm_step_number": self.fsm_state.current_step.id if self.fsm_state.current_step else (self.fsm_state.total_steps + 1 if self.fsm_state.is_complete else 0),
             "voice_prompt": self.voice_message,
             "voice_status": self.voice_status,
+        }
+
+        # Requirement 9 Master Prompt Validation & Perception Debug Panel
+        exp_step_id = self.fsm_state.current_step.id if self.fsm_state.current_step else 0
+        exp_action = getattr(self.fsm_state.current_step, "expected_action", "") or (self.fsm_state.current_step.action.split("_")[0] if self.fsm_state.current_step else "IDLE")
+        exp_target = getattr(self.fsm_state.current_step, "expected_object", "") or (self.fsm_state.current_step.action.split("_", 1)[1] if self.fsm_state.current_step and "_" in self.fsm_state.current_step.action else "")
+
+        det_action = self.confirmed_action.action if self.confirmed_action else (self.action_prediction.action if self.action_prediction else "IDLE")
+        det_target = self.confirmed_action.object_name if self.confirmed_action else (self.action_prediction.target_object if self.action_prediction else "")
+
+        target_match = bool(v_debug.get("targetMatch", (det_target.upper() == exp_target.upper()))) if (exp_target and det_target) else bool(v_debug.get("targetMatch", False))
+        temporal_val = str(v_debug.get("temporalConfirmation", "3 / 3" if val_state in ("CONFIRMED_CORRECT", "PASS") else "0 / 3"))
+        val_status_str = "PASS" if getattr(self.confirmed_action, "status", None) == ActionGateStatus.CONFIRMED_CORRECT else (
+            "WAITING" if getattr(self.confirmed_action, "status", None) == ActionGateStatus.WAITING else "CONFIRMING"
+        )
+        fsm_trans_str = f"STEP {exp_step_id} -> STEP {exp_step_id + 1}" if getattr(self.fsm_state, "is_transition", False) else f"STEP {exp_step_id} (ACTIVE)"
+        timeline_str = f"{len(self.fsm_state.completed_step_ids)} / {self.fsm_state.total_steps} DONE"
+
+        raw_list = [f"{d.get('raw_class', '')} {int(d.get('confidence', 0)*100)}%" for d in (self.raw_detections or [])]
+        if not raw_list:
+            raw_list = [f"{o.class_name} {int(o.confidence*100)}%" for o in self.detected_objects]
+
+        nms_list = [f"{d.get('class', '')} {int(d.get('conf', 0)*100)}%" for d in (self.nms_detections or [])]
+        if not nms_list:
+            nms_list = [f"{o.class_name} {int(o.confidence*100)}%" for o in self.detected_objects]
+
+        tracked_list = [
+            f"{getattr(t, 'class_name', '')} -> ID {getattr(t, 'track_id', '?')}"
+            for t in self.tracks if getattr(t, 'track_id', -1) > 0
+        ]
+        if not tracked_list:
+            tracked_list = [
+                f"{o.class_name} -> ID {getattr(o, 'track_id', '?')}"
+                for o in self.detected_objects if getattr(o, 'track_id', -1) > 0
+            ]
+
+        d["debug_panel"] = {
+            "raw_detections": raw_list,
+            "after_nms": nms_list,
+            "tracked": tracked_list,
+            "expected": f"{exp_action} + {exp_target}",
+            "detected": f"{det_action} + {det_target}",
+            "target_match": target_match,
+            "temporal": temporal_val,
+            "validation": val_status_str,
+            "fsm": fsm_trans_str,
+            "timeline": timeline_str,
+        }
+
+        # Multi-Object YOLO Detections Summary (all 5 required classes)
+        yolo_summary = {}
+        for c in ["yellow_box", "blue_box", "pen", "watch", "hand"]:
+            matching = [o for o in self.detected_objects if getattr(o, "class_name", "") == c]
+            if matching:
+                top = max(matching, key=lambda x: getattr(x, "confidence", 0.0))
+                yolo_summary[c] = {
+                    "detected": True,
+                    "confidence": round(float(top.confidence), 3),
+                    "box": list(top.bbox),
+                }
+            else:
+                yolo_summary[c] = {
+                    "detected": False,
+                    "confidence": 0.0,
+                    "box": [],
+                }
+        d["yolo_detections_summary"] = yolo_summary
+
+        # Real-Time ACTION STATE dictionary for debug panel
+        hand_detected = bool(self.left_hand or self.right_hand or any(getattr(o, "class_name", "") == "hand" for o in self.detected_objects))
+        target_detected = bool(any(getattr(o, "class_name", "") == exp_target for o in self.detected_objects))
+        dist_val = features.get("hand_object_distance", "--") if features else "--"
+        motion_detected = bool(
+            (features and (features.get("object_velocity", 0.0) > 10.0 or features.get("hand_velocity", 0.0) > 15.0))
+            or (self.left_hand and getattr(self.left_hand, "speed", 0.0) > 15.0)
+            or (self.right_hand and getattr(self.right_hand, "speed", 0.0) > 15.0)
+        )
+        val_prog = 100 if val_state in ("ACTION_CONFIRMED", "CONFIRMED_CORRECT") else int(step_conf * 100)
+        is_step_complete = bool(val_state in ("ACTION_CONFIRMED", "CONFIRMED_CORRECT") or getattr(self.confirmed_action, "status", None) == ActionGateStatus.CONFIRMED_CORRECT)
+
+        d["action_state"] = {
+            "frame_id": self.frame_index,
+            "current_step": f"{exp_step_id} / {self.fsm_state.total_steps}",
+            "current_step_label": f"Step {exp_step_id}: {self.fsm_state.current_step.label if self.fsm_state.current_step else 'None'}",
+            "expected": exp_action,
+            "expected_action": exp_action,
+            "required": exp_target or "NONE",
+            "required_object": exp_target or "NONE",
+            "validator": "IDENTIFY_OBJECT" if "IDENTIFY" in exp_action else f"{exp_action}_VALIDATOR",
+            "object_valid": "YES" if (target_detected or target_match) else "NO",
+            "consecutive": temporal_val,
+            "action": det_action,
+            "detected_action": det_action,
+            "step": "READY TO COMPLETE" if is_step_complete else ("COMPLETED" if self.fsm_state.is_complete else "IN PROGRESS"),
+            "step_status": "READY TO COMPLETE" if is_step_complete else ("COMPLETED" if self.fsm_state.is_complete else "IN PROGRESS"),
+            "hand_detected": "YES" if hand_detected else "NO",
+            "object_detected": "YES" if target_detected else "NO",
+            "hand_object_distance": f"{dist_val}px" if isinstance(dist_val, (int, float)) and dist_val < 900 else "--",
+            "spatial_relationship": "NEAR" if (isinstance(dist_val, (int, float)) and dist_val < 100) else ("CONTACT" if (features and features.get("is_contact", False)) else "SEPARATED"),
+            "motion_detected": "YES" if motion_detected else "NO",
+            "validation_progress": f"{val_prog}%",
+            "step_complete": "YES" if is_step_complete else "NO",
+        }
+
+        d["realtime_debug_state"] = {
+            "frame_id": self.frame_index,
+            "detections": {
+                "BLUE_BOX": {"detected": len(grp.get("BLUE_BOX", [])) > 0, "conf": max([x.get("confidence", 0.0) for x in grp.get("BLUE_BOX", [])], default=0.0)},
+                "YELLOW_BOX": {"detected": len(grp.get("YELLOW_BOX", [])) > 0, "conf": max([x.get("confidence", 0.0) for x in grp.get("YELLOW_BOX", [])], default=0.0)},
+                "PEN": {"detected": len(grp.get("PEN", [])) > 0, "conf": max([x.get("confidence", 0.0) for x in grp.get("PEN", [])], default=0.0)},
+                "WATCH": {"detected": len(grp.get("WATCH", [])) > 0, "conf": max([x.get("confidence", 0.0) for x in grp.get("WATCH", [])], default=0.0)},
+                "HAND": {"detected": len(grp.get("HAND", [])) > 0, "conf": max([x.get("confidence", 0.0) for x in grp.get("HAND", [])], default=0.0)},
+            },
+            "current_step": f"{exp_step_id} / {self.fsm_state.total_steps}",
+            "expected": exp_action,
+            "required": exp_target or "NONE",
+            "validator": "IDENTIFY_OBJECT" if "IDENTIFY" in exp_action else f"{exp_action}_VALIDATOR",
+            "object_valid": "YES" if (target_detected or target_match) else "NO",
+            "consecutive": temporal_val,
+            "action": det_action,
+            "step": "READY TO COMPLETE" if is_step_complete else ("COMPLETED" if self.fsm_state.is_complete else "IN PROGRESS"),
         }
 
         d["rules"] = [
@@ -246,6 +425,7 @@ class StateManager:
         self._last_wrong_voice_time: float = 0.0
         self._wrong_voice_cooldown_seconds: float = 4.0
         self._last_step_id: Optional[int] = None
+        self._last_progress_voice_time: float = 0.0
 
         logger.info("StateManager initialized. Experiment: %s", self.experiment_id)
 
@@ -363,6 +543,9 @@ class StateManager:
         video_time: str = "00:00.00",
         frame_age_ms: float = 0.0,
         is_stale: bool = False,
+        raw_detections: Optional[list] = None,
+        nms_detections: Optional[list] = None,
+        grouped_detections: Optional[dict] = None,
     ) -> ValidationResult:
         """
         Process perception & interaction evidence through ActionConfirmationGate and FSM.
@@ -492,6 +675,11 @@ class StateManager:
                 wrong_event_id=event_id,
                 track_id=trk_id,
             )
+        elif getattr(confirmed_action, "validation_state", "") == "ACTION_IN_PROGRESS":
+            # Section 13: "Good, continue." when operator is approaching the correct action
+            if (now - self._last_progress_voice_time) > 8.0 and self.voice_status == "IDLE":
+                self._last_progress_voice_time = now
+                self._execute_voice("Good, continue.", step_id=current_step.id if current_step else 0, voice_type="GUIDANCE")
 
         # Run rule engine for telemetry
         rule_matches: list[RuleMatch] = []
@@ -549,6 +737,9 @@ class StateManager:
             tracks=tracks or [],
             frame_age_ms=frame_age_ms,
             is_stale=is_stale,
+            raw_detections=raw_detections,
+            nms_detections=nms_detections,
+            grouped_detections=grouped_detections,
         )
 
     def reset(self) -> None:
@@ -604,24 +795,49 @@ class StateManager:
                 best_contact = max(contact, key=lambda x: getattr(x, "confidence", 0.0))
                 return best_contact.object_class
 
+            # Check for near / approaching objects
+            near = [i for i in interactions if getattr(getattr(i, "state", None), "name", "") in ("NEAR_OBJECT", "NEAR", "APPROACHING")]
+            if near:
+                best_near = max(near, key=lambda x: getattr(x, "confidence", 0.0))
+                return best_near.object_class
+
+            # Check pointing
+            pointing = [i for i in interactions if getattr(i, "is_pointing", False)]
+            if pointing:
+                best_pt = max(pointing, key=lambda x: getattr(x, "confidence", 0.0))
+                return best_pt.object_class
+
         if not detected_objects:
             return ""
 
-        # Filter out PERSON
-        candidates = [o for o in detected_objects if o.class_name != "PERSON"]
+        # Filter out PERSON/human detections
+        candidates = [o for o in detected_objects if str(o.class_name).upper() not in ("PERSON", "HUMAN")]
         if not candidates:
             return ""
 
-        # If current expected step mentions specific objects, prioritize those
+        # 1. If interactions exist, prefer candidate closest to the active hand
+        if interactions:
+            cand_inter = [i for i in interactions if getattr(i, "object_class", "") in {str(c.class_name).upper() for c in candidates}]
+            if cand_inter:
+                best_by_dist = min(cand_inter, key=lambda x: getattr(x, "distance_px", 9999.0))
+                if getattr(best_by_dist, "distance_px", 9999.0) < 300.0:
+                    return str(best_by_dist.object_class).upper()
+
+        # 2. If current expected step mentions specific objects, check matching candidates
         current = self.fsm.get_current_state().current_step
         if current:
-            expected_objs = {o.upper() for o in current.expected_objects}
-            matching = [o for o in candidates if o.class_name in expected_objs]
+            expected_objs = {str(o).upper() for o in current.expected_objects}
+            matching = [o for o in candidates if str(o.class_name).upper() in expected_objs]
             if matching:
-                return max(matching, key=lambda x: x.confidence).class_name
+                return str(matching[0].class_name).upper()
 
-        # Otherwise return highest-confidence non-person object
-        return max(candidates, key=lambda x: x.confidence).class_name
+        # 3. If predicted action specifies target object that is present, preserve it
+        if prediction and getattr(prediction, "target_object", ""):
+            pred_tgt = str(prediction.target_object).upper()
+            if any(str(c.class_name).upper() == pred_tgt for c in candidates):
+                return pred_tgt
+
+        return str(candidates[0].class_name).upper()
 
     # ----------------------------------------------------------------------- #
     # Message generation

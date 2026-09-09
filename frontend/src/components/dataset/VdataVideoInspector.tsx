@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Eye, Film, Play, Pause, SkipForward, SkipBack, Cpu, Layers, CheckCircle2 } from 'lucide-react';
+import { Eye, Film, Play, Pause, SkipForward, SkipBack, Cpu, Layers, CheckCircle2, AlertTriangle, RotateCcw } from 'lucide-react';
+import { BACKEND_BASE } from '../../api/camera';
 
 interface VdataVideo {
   filename: string;
@@ -50,12 +51,14 @@ export default function VdataVideoInspector() {
   const [frameData, setFrameData] = useState<InspectFrameResult | null>(null);
   const [loadingFrame, setLoadingFrame] = useState<boolean>(false);
   const [streamKey, setStreamKey] = useState<number>(Date.now());
+  const [streamLoading, setStreamLoading] = useState<boolean>(true);
+  const [streamError, setStreamError] = useState<boolean>(false);
 
   // Fetch reference videos
   useEffect(() => {
     const fetchVideos = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/vdata/videos');
+        const res = await fetch(`${BACKEND_BASE}/api/vdata/videos`);
         if (res.ok) {
           const data: VdataVideo[] = await res.json();
           setVideos(data);
@@ -78,7 +81,7 @@ export default function VdataVideoInspector() {
     const inspectFrame = async () => {
       setLoadingFrame(true);
       try {
-        const res = await fetch('http://localhost:8000/api/vdata/inspect_frame', {
+        const res = await fetch(`${BACKEND_BASE}/api/vdata/inspect_frame`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ filename: selectedVideo, frame_idx: currentFrameIdx }),
@@ -107,6 +110,8 @@ export default function VdataVideoInspector() {
   const handleVideoSelect = (fname: string) => {
     setSelectedVideo(fname);
     setCurrentFrameIdx(0);
+    setStreamError(false);
+    setStreamLoading(true);
     setStreamKey(Date.now());
   };
 
@@ -158,7 +163,7 @@ export default function VdataVideoInspector() {
         <label className="text-xs text-space-400 block mb-2 tracking-wider">
           SELECT REFERENCE VIDEO FROM VDATA:
         </label>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
           {videos.map((vid) => {
             const isSelected = vid.filename === selectedVideo;
             return (
@@ -201,12 +206,46 @@ export default function VdataVideoInspector() {
           <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
             {mode === 'stream' && selectedVideo ? (
               isPlayingStream ? (
-                <img
-                  key={`${selectedVideo}-${streamKey}`}
-                  src={`http://localhost:8000/api/vdata/stream/${selectedVideo}?t=${streamKey}`}
-                  alt="YOLO Reference Stream"
-                  className="w-full h-full object-contain"
-                />
+                <>
+                  {streamError ? (
+                    <div className="flex flex-col items-center justify-center text-space-400 gap-3 p-6 text-center">
+                      <AlertTriangle className="w-10 h-10 text-amber-400 animate-pulse" />
+                      <div className="text-sm font-bold text-space-200">Stream Connection Error</div>
+                      <span className="text-xs text-space-400 max-w-sm">
+                        Unable to stream "{selectedVideo}".
+                      </span>
+                      <button
+                        onClick={() => {
+                          setStreamError(false);
+                          setStreamLoading(true);
+                          setStreamKey(Date.now());
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-cyan/20 border border-accent-cyan text-accent-cyan rounded text-xs hover:bg-accent-cyan/30 transition-all font-bold"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Retry Stream
+                      </button>
+                    </div>
+                  ) : (
+                    <img
+                      key={`${selectedVideo}-${streamKey}`}
+                      src={`${BACKEND_BASE}/api/vdata/stream/${encodeURIComponent(selectedVideo)}?t=${streamKey}`}
+                      alt="YOLO Reference Stream"
+                      className="w-full h-full object-contain"
+                      onLoad={() => setStreamLoading(false)}
+                      onError={() => {
+                        setStreamLoading(false);
+                        setStreamError(true);
+                      }}
+                    />
+                  )}
+                  {streamLoading && !streamError && (
+                    <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-space-300 gap-2 pointer-events-none">
+                      <Film className="w-8 h-8 animate-pulse text-accent-cyan" />
+                      <span className="text-xs font-mono">Initializing YOLO stream...</span>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="flex flex-col items-center justify-center text-space-400 gap-2">
                   <Pause className="w-10 h-10" />

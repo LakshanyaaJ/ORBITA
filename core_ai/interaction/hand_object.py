@@ -49,7 +49,7 @@ class InteractionState(IntEnum):
     MANIPULATING = 3
 
 
-CONTAINER_CLASSES = {"MAIN_BOX", "RED_BOX", "YELLOW_BOX"}
+CONTAINER_CLASSES = {"MAIN_BOX", "RED_BOX", "YELLOW_BOX", "BLUE_BOX"}
 MANIPULABLE_CLASSES = {"SAMPLE", "TOOL"}
 
 
@@ -72,11 +72,17 @@ class HandObjectInteraction:
     velocity_score: float = 0.0
     temporal_score: float = 0.0
 
-    # High-level semantics
+    # High-level semantics & kinematics
     is_fingertip_contact: bool = False
     is_holding: bool = False
     transfer_event: Optional[str] = None  # e.g. "TRANSFER(SAMPLE -> YELLOW_BOX)"
     target_container: Optional[str] = None
+    hand_object_overlap: float = 0.0
+    relative_hand_object_motion: float = 0.0
+    is_pointing: bool = False
+    hand_speed: float = 0.0
+    object_speed: float = 0.0
+    contact_duration: int = 0
 
 
 @dataclass
@@ -93,6 +99,23 @@ class InteractionTrackerState:
     cumulative_object_displacement: float = 0.0
     prev_distances: deque = field(default_factory=lambda: deque(maxlen=6))
     initial_holding_container: Optional[str] = None
+
+
+def bbox_iou(boxA: tuple[int, int, int, int], boxB: tuple[int, int, int, int]) -> float:
+    """Computes IoU between two (x, y, w, h) bounding boxes."""
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[0] + boxA[2], boxB[0] + boxB[2])
+    yB = min(boxA[1] + boxA[3], boxB[1] + boxB[3])
+    interW = max(0, xB - xA)
+    interH = max(0, yB - yA)
+    interArea = interW * interH
+    if interArea <= 0:
+        return 0.0
+    boxAArea = boxA[2] * boxA[3]
+    boxBArea = boxB[2] * boxB[3]
+    unionArea = float(boxAArea + boxBArea - interArea)
+    return float(interArea / max(unionArea, 1e-6))
 
 
 def point_to_bbox_distance(pt: np.ndarray, bbox: tuple[int, int, int, int]) -> float:
@@ -286,14 +309,45 @@ class HandObjectInteractionTracker:
         if hand.index_tip is not None:
             dist_index = point_to_bbox_distance(hand.index_tip, obj.bbox)
 
-        min_fingertip_dist = min(dist_thumb, dist_index)
+        fingertip_dists = [dist_thumb, dist_index]
+        for tip in (hand.middle_tip, hand.ring_tip, hand.pinky_tip):
+            if tip is not None:
+                fingertip_dists.append(point_to_bbox_distance(tip, obj.bbox))
+
+        min_fingertip_dist = min(fingertip_dists)
         effective_dist = min(min_fingertip_dist, dist_wrist)
+
+        # Bounding box overlap between hand and object
+        hand_obj_iou = 0.0
+        hand_obj_overlap_px = 0.0
+        if getattr(hand, "bbox", None) and getattr(obj, "bbox", None):
+            hx, hy, hw, hh = hand.bbox
+            ox, oy, ow, oh = obj.bbox
+            ix1 = max(hx, ox)
+            iy1 = max(hy, oy)
+            ix2 = min(hx + hw, ox + ow)
+            iy2 = min(hy + hh, oy + oh)
+            if ix2 > ix1 and iy2 > iy1:
+                hand_obj_overlap_px = float((ix2 - ix1) * (iy2 - iy1))
+                hand_obj_iou = hand_obj_overlap_px / float(hw * hh + ow * oh - hand_obj_overlap_px + 1e-6)
+
+        any_tip_inside = any(
+            tip is not None and bbox_contains_point(tip, obj.bbox)
+            for tip in (hand.thumb_tip, hand.index_tip, hand.middle_tip, hand.ring_tip, hand.pinky_tip)
+        )
+        any_landmark_inside = False
+        if hand.finger_landmarks is not None and len(hand.finger_landmarks) == 21:
+            for lm in hand.finger_landmarks:
+                if bbox_contains_point(lm, obj.bbox):
+                    any_landmark_inside = True
+                    break
 
         # Fingertip contact flag
         is_fingertip_contact = (
-            min_fingertip_dist < 28.0 or
-            (hand.index_tip is not None and bbox_contains_point(hand.index_tip, obj.bbox)) or
-            (hand.thumb_tip is not None and bbox_contains_point(hand.thumb_tip, obj.bbox))
+            min_fingertip_dist < 32.0 or
+            any_tip_inside or
+            any_landmark_inside or
+            (hand_obj_overlap_px > 150.0 and min_fingertip_dist < 60.0)
         )
 
         # 2. Object kinematics and displacement
@@ -428,6 +482,17 @@ class HandObjectInteractionTracker:
             0.0, 1.0
         ))
 
+        # Overlap and Pointing gesture computation
+        hand_overlap = 0.0
+        if getattr(hand, "bbox", None) and getattr(obj, "bbox", None):
+            hand_overlap = bbox_iou(hand.bbox, obj.bbox)
+
+        is_pointing = False
+        if dist_index != float("inf") and dist_wrist != float("inf"):
+            # Index tip closer than wrist by at least 15px and within 220px of object
+            if dist_index < 220.0 and (dist_wrist - dist_index) >= 15.0:
+                is_pointing = True
+
         return HandObjectInteraction(
             hand_side=key[0],
             object_class=key[1],
@@ -446,5 +511,11 @@ class HandObjectInteractionTracker:
             is_holding=(s.state == InteractionState.HOLDING),
             transfer_event=transfer_event,
             target_container=self._object_containers.get(obj.class_name),
+            hand_object_overlap=hand_overlap,
+            relative_hand_object_motion=vel_similarity,
+            is_pointing=is_pointing,
+            hand_speed=float(getattr(hand, "speed", 0.0)),
+            object_speed=obj_speed,
+            contact_duration=s.contact_frame_count,
         )
 

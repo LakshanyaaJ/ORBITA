@@ -50,6 +50,51 @@ export default function ExperimentBrowser() {
           </div>
         </div>
 
+        {/* EXP-VDATA */}
+        <div className="bg-space-800 border border-space-600 hover:border-accent-cyan rounded-lg p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 transition-colors shadow-lg">
+          <div className="flex-1">
+            <div className="flex items-center gap-4 mb-2">
+              <span className="font-mono text-xl font-bold tracking-widest text-accent-cyan">EXP-VDATA</span>
+              <span className="bg-cyan-500/20 text-accent-cyan border border-accent-cyan/40 px-2 py-0.5 rounded font-mono text-xs font-bold tracking-widest">
+                REFERENCE RUN
+              </span>
+              <span className="bg-status-success/20 text-status-success px-2 py-0.5 rounded font-mono text-xs font-bold tracking-widest">
+                READY
+              </span>
+            </div>
+            <h3 className="font-bold text-2xl text-space-100 mb-2">BLUE AND YELLOW BOX VDATA</h3>
+            <p className="text-space-400 text-sm max-w-2xl leading-relaxed">
+              Step-by-step AI copilot validation over real reference video telemetry (vdata/). Plays recorded experiment trials while YOLO object detection, hand tracking, and FSM validate all 13 physical procedure steps in real time.
+            </p>
+          </div>
+          
+          <div className="flex items-center gap-8 border-l border-space-600 pl-8">
+            <div className="text-right font-mono">
+              <div className="text-space-400 text-xs tracking-widest">PROTOCOL</div>
+              <div className="text-space-100 font-bold">13 STEPS</div>
+            </div>
+            <div className="text-right font-mono">
+              <div className="text-space-400 text-xs tracking-widest">SOURCE</div>
+              <div className="text-accent-cyan font-bold">vdata/ MP4</div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 ml-8">
+            <button 
+              onClick={() => navigate('/experiments/EXP-VDATA/briefing')}
+              className="px-6 py-3 bg-accent-cyan text-space-900 font-mono font-bold tracking-widest rounded-md hover:bg-accent-cyan/90 transition-colors shadow-md"
+            >
+              START
+            </button>
+            <button 
+              onClick={() => navigate('/experiments/EXP-VDATA/briefing')}
+              className="px-6 py-3 bg-space-700 text-space-100 font-mono font-bold tracking-widest rounded-md hover:bg-space-600 transition-colors"
+            >
+              BRIEFING
+            </button>
+          </div>
+        </div>
+
         {/* EXP-02 */}
         <div className="bg-space-800 border border-space-600/50 rounded-lg p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 opacity-75">
           <div className="flex-1">

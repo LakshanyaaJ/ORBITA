@@ -252,9 +252,19 @@ class MultiObjectTracker:
                 cost_matrix[t_idx, :] = 10.0
                 cost_matrix[:, d_idx] = 10.0
 
-        # Create new tracks for unmatched detections
+        # Create new tracks for unmatched detections with duplicate rejection safeguard
         for d_idx, det in enumerate(detections):
             if d_idx not in matched_detections:
+                # SAFEGUARD: Do not spawn a new track if another active track of the same canonical class overlaps
+                overlapping_existing = any(
+                    (t.class_name == det.class_name or {t.class_name, det.class_name} <= {"BLUE_BOX", "MAIN_BOX"})
+                    and compute_iou(t.bbox, det.bbox) > 0.35
+                    and t.time_since_update <= 5
+                    for t in self._tracks.values()
+                )
+                if overlapping_existing:
+                    continue
+
                 new_id = self._next_id
                 self._next_id += 1
                 new_track = TrackedState(
@@ -288,6 +298,26 @@ class MultiObjectTracker:
         for t_id in dead_ids:
             del self._tracks[t_id]
 
+        # Deduplicate active tracks of the same class that heavily overlap (IoU > 0.40)
+        track_ids_list = list(self._tracks.keys())
+        for i in range(len(track_ids_list)):
+            tid1 = track_ids_list[i]
+            if tid1 not in self._tracks:
+                continue
+            trk1 = self._tracks[tid1]
+            for j in range(i + 1, len(track_ids_list)):
+                tid2 = track_ids_list[j]
+                if tid2 not in self._tracks:
+                    continue
+                trk2 = self._tracks[tid2]
+                same_cls = (trk1.class_name == trk2.class_name) or ({trk1.class_name, trk2.class_name} <= {"BLUE_BOX", "MAIN_BOX"})
+                if same_cls and compute_iou(trk1.bbox, trk2.bbox) > 0.40:
+                    if trk1.hits >= trk2.hits:
+                        del self._tracks[tid2]
+                    else:
+                        del self._tracks[tid1]
+                        break
+
         # Determine primary operator if persons are present
         persons = [t for t in self._tracks.values() if t.class_name == "PERSON" and t.time_since_update == 0]
         if persons:
@@ -296,7 +326,16 @@ class MultiObjectTracker:
         else:
             self._primary_operator_id = None
 
-        return detections
+        # Return only detections with valid, active tracks and no duplicate track IDs
+        seen_track_ids = set()
+        canonical_detections = []
+        for det in detections:
+            tid = getattr(det, "track_id", -1)
+            if tid > 0 and tid in self._tracks and tid not in seen_track_ids:
+                seen_track_ids.add(tid)
+                canonical_detections.append(det)
+
+        return canonical_detections
 
     def update_interaction_states(self, interactions: list[Any], dt: float = 0.033) -> None:
         """Update physical tracking states (ON_TABLE, HAND_CONTACT, BEING_HELD, CARRIED, RELEASED, PLACED)."""
@@ -332,11 +371,12 @@ class MultiObjectTracker:
         for track in self._tracks.values():
             if track.track_id not in active_objects:
                 track.hand_contact = False
-                if track.state in (ObjectPhysicalState.HAND_CONTACT, ObjectPhysicalState.RELEASED):
-                    track.state = ObjectPhysicalState.ON_TABLE
+                track.held_duration = 0.0
+                track.state = ObjectPhysicalState.ON_TABLE
 
     def get_track(self, track_id: int) -> Optional[TrackedState]:
         return self._tracks.get(track_id)
 
-    def get_active_tracks(self) -> List[TrackedState]:
-        return [t for t in self._tracks.values() if t.time_since_update == 0]
+    def get_active_tracks(self, max_staleness: int = 3) -> List[TrackedState]:
+        return [t for t in self._tracks.values() if t.time_since_update <= max_staleness]
+

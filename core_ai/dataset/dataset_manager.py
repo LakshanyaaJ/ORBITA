@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -37,6 +37,7 @@ class DatasetManifest:
     total_videos: int = 0
     total_extracted_frames: int = 0
     annotated_frames: int = 0
+    verified_frames: int = 0
     approved_samples: int = 0
     pending_review: int = 0
     rejected_samples: int = 0
@@ -109,22 +110,20 @@ class DatasetManager:
         n = len(video_ids)
         mapping: dict[str, str] = {}
 
-        if n == 1:
+        if n == 0:
+            return mapping
+        elif n == 1:
             mapping[video_ids[0]] = "train"
         elif n == 2:
             mapping[video_ids[0]] = "train"
             mapping[video_ids[1]] = "val"
-        elif n == 3:
-            mapping[video_ids[0]] = "train"
-            mapping[video_ids[1]] = "val"
-            mapping[video_ids[2]] = "test"
         else:
             n_train = max(1, int(round(n * train_ratio)))
             n_val = max(1, int(round(n * val_ratio)))
             for i, vid in enumerate(video_ids):
                 if i < n_train:
                     mapping[vid] = "train"
-                elif i < (n_train + n_val):
+                elif i < n_train + n_val:
                     mapping[vid] = "val"
                 else:
                     mapping[vid] = "test"
@@ -188,7 +187,9 @@ class DatasetManager:
         try:
             with open(self.manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return DatasetManifest(**data)
+            valid_keys = {field_obj.name for field_obj in fields(DatasetManifest)}
+            filtered_data = {k: v for k, v in data.items() if k in valid_keys}
+            return DatasetManifest(**filtered_data)
         except Exception as exc:
             logger.warning("Failed to load dataset manifest: %s", exc)
             return None

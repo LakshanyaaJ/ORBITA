@@ -89,16 +89,26 @@ export default function MissionHome() {
               ASSIGNED EXPERIMENTS
             </h2>
             <span className="font-mono text-[11px] text-space-400">
-              2 PROTOCOLS LOADED
+              3 PROTOCOLS LOADED
             </span>
           </div>
           
           <div className="space-y-4">
             <ExperimentCard 
+              id="EXP-VDATA" 
+              name="BLUE AND YELLOW BOX VDATA" 
+              payload="VDATA REF VIDEO"
+              steps={13} 
+              status="READY"
+              description="Step-by-step AI copilot validation over reference video telemetry (vdata/). Evaluates YOLO detection, hand tracking, and 13-step procedural progression in real time."
+              nextAction="Step 01 Identify Blue Box"
+              onClick={() => navigate('/experiments/EXP-VDATA/briefing')}
+            />
+            <ExperimentCard 
               id="EXP-01" 
               name="YELLOW AND BLUE BOX" 
               payload="BOX-01 PAYLOAD"
-              steps={2} 
+              steps={13} 
               status="READY"
               description="Autonomous identification, manipulation, and placement validation of Yellow and Blue box experiment assets."
               nextAction="Step 01 Identify Blue Box"

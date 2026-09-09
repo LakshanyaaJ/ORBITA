@@ -477,6 +477,10 @@ class ExperimentFSM:
             conf,
             reason,
         )
+        checklist = getattr(confirmed_action, "why_completed_checklist", []) if confirmed_action else []
+        checklist_str = "\n".join(f"  ✓ {c.get('criterion', '')}: {c.get('detail', '')}" for c in checklist if c.get('satisfied'))
+        if checklist_str:
+            logger.info("FSM_WHY_COMPLETED (Step %d):\n%s", from_step, checklist_str)
         logger.info("FSM: Step %d (%s) COMPLETED -> advancing to Step %d.", from_step, current.action, to_step)
 
     @staticmethod
@@ -499,6 +503,11 @@ class ExperimentFSM:
 
         # Exact match (TAKE_RED_BOX == TAKE_RED_BOX)
         if full_detected == expected_action:
+            return True
+
+        norm_full = normalize_action(full_detected)
+        norm_exp = normalize_action(expected_action)
+        if norm_full == norm_exp and norm_full != "IDLE":
             return True
 
         # Verb-only detected, expected has no object component

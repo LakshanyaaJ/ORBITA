@@ -17,18 +17,18 @@
     "window_overlap_between_splits": 0.0,
     "shared_operators_between_train_and_test": false
   },
-  "unseen_run_accuracy": 0.8333,
-  "unseen_run_f1": 0.8042,
+  "unseen_run_accuracy": 0.7778,
+  "unseen_run_f1": 0.7222,
   "per_class_f1": {
     "IDLE": 1.0,
-    "OPEN": 0.6667,
+    "OPEN": 0.0,
     "TAKE": 1.0,
     "PLACE": 1.0,
     "TRANSFER": 1.0,
-    "CLOSE": 0.0,
-    "ACTIVATE": 0.5714,
+    "CLOSE": 0.5,
+    "ACTIVATE": 0.0,
     "PERFORM": 1.0,
     "STORE": 1.0
   },
-  "trained_checkpoint": "C:\\Users\\AJAI\\AppData\\Local\\Temp\\orbita_e2e_f2xuq24u\\models\\orbita_gru_v2.pth"
+  "trained_checkpoint": "C:\\project\\ORBITA\\models\\orbita_gru_v3.pth"
 }

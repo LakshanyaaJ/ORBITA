@@ -30,6 +30,160 @@ logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
+# Ontology, Class Normalization & Audit Constants
+# --------------------------------------------------------------------------- #
+REQUIRED_YOLO_CLASSES: list[str] = [
+    "LOCATION_A",
+    "LOCATION_B",
+    "PEN",
+    "WATCH",
+    "BLUE_BOX",
+    "YELLOW_BOX",
+    "HAND",
+]
+
+DEFAULT_CLASS_THRESHOLDS: dict[str, float] = {
+    "location_a": 0.25,
+    "location_b": 0.25,
+    "pen": 0.20,        # Sensitive for slender lab instruments
+    "watch": 0.20,      # Sensitive for small specimens
+    "blue_box": 0.25,
+    "yellow_box": 0.25,
+    "hand": 0.25,       # Stable tracking threshold
+}
+
+
+class NormalizedClassName(str):
+    """
+    String subclass supporting bidirectional case-insensitive comparison
+    and canonical ORBITA ontology alias matching.
+    """
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, (str, NormalizedClassName)):
+            return False
+        s1 = self.lower().strip()
+        s2 = str(other).lower().strip()
+        if s1 == s2:
+            return True
+        aliases = {
+            "location_a": {"location_a", "loc_a", "loca", "location a"},
+            "location_b": {"location_b", "loc_b", "locb", "location b"},
+            "yellow_box": {"yellow_box", "yellow_box_container"},
+            "blue_box": {"blue_box", "main_box", "blue_box_container"},
+            "pen": {"pen", "tool"},
+            "watch": {"watch", "sample"},
+            "hand": {"hand", "hands"},
+        }
+        for group in aliases.values():
+            if s1 in group and s2 in group:
+                return True
+        return False
+
+    def __hash__(self) -> int:
+        return str.__hash__(self)
+
+
+def map_raw_to_app_class(raw_name: str) -> str:
+    """Normalize names so variants map correctly to canonical application classes."""
+    raw = str(raw_name).lower().strip()
+    if raw in ("location_a", "loc_a", "loca", "location a"):
+        return "LOCATION_A"
+    if raw in ("location_b", "loc_b", "locb", "location b"):
+        return "LOCATION_B"
+    if raw in ("yellow_box", "yellow box", "yellow_box_container"):
+        return "YELLOW_BOX"
+    if raw in ("blue_box", "blue box", "main_box", "main box", "blue_box_container"):
+        return "BLUE_BOX"
+    if raw in ("pen", "tool", "pencil", "marker", "stylus"):
+        return "PEN"
+    if raw in ("watch", "sample", "clock", "wristwatch", "timer", "specimen"):
+        return "WATCH"
+    if raw in ("hand", "hands", "person_hand"):
+        return "HAND"
+    return raw.upper()
+
+
+def audit_model_classes(model_names: dict[int, str] | list[str]) -> list[str]:
+    """
+    Prints model classes and verifies presence of all 7 required YOLO classes.
+    Reports any missing class with:
+      'MISSING MODEL CLASS: <class>'
+    Returns list of missing classes.
+    """
+    if isinstance(model_names, dict):
+        items = sorted(model_names.items(), key=lambda x: int(x[0]) if str(x[0]).isdigit() else str(x[0]))
+    else:
+        items = list(enumerate(model_names))
+
+    print("\nMODEL CLASSES:")
+    for idx, name in items:
+        print(f"{idx} -> {name}")
+
+    print("\nYOLO CLASS ID -> APPLICATION CLASS:")
+    for idx, name in items:
+        app_cls = map_raw_to_app_class(name)
+        print(f"{idx} -> {app_cls}")
+
+    mapped_app_classes = {map_raw_to_app_class(name) for _, name in items}
+    missing_classes: list[str] = []
+
+    for req_cls in REQUIRED_YOLO_CLASSES:
+        if req_cls not in mapped_app_classes:
+            print(f"MISSING MODEL CLASS: {req_cls}")
+            logger.warning("MISSING MODEL CLASS: %s", req_cls)
+            missing_classes.append(req_cls)
+
+    return missing_classes
+
+
+class NormalizedDetectionsDict(dict):
+    """
+    Unified detection dictionary supporting both canonical uppercase (LOCATION_A, LOCATION_B,
+    BLUE_BOX, YELLOW_BOX, PEN, WATCH, HAND) and lowercase (location_a, etc.) access.
+    """
+    def _norm_key(self, k: Any) -> str:
+        s = str(k).upper().strip()
+        if s in ("LOC_A", "LOCA", "LOCATION A"):
+            return "LOCATION_A"
+        if s in ("LOC_B", "LOCB", "LOCATION B"):
+            return "LOCATION_B"
+        if s in ("MAIN_BOX", "BLUE_BOX_CONTAINER"):
+            return "BLUE_BOX"
+        if s in ("YELLOW_BOX_CONTAINER",):
+            return "YELLOW_BOX"
+        if s in ("TOOL", "PENCIL"):
+            return "PEN"
+        if s in ("SAMPLE", "CLOCK"):
+            return "WATCH"
+        if s in ("HANDS", "PERSON_HAND"):
+            return "HAND"
+        return s
+
+    def __getitem__(self, key: Any) -> Any:
+        nk = self._norm_key(key)
+        if super().__contains__(nk):
+            return super().__getitem__(nk)
+        lk = str(key).lower().strip()
+        if super().__contains__(lk):
+            return super().__getitem__(lk)
+        if super().__contains__(key):
+            return super().__getitem__(key)
+        return []
+
+    def __contains__(self, key: Any) -> bool:
+        nk = self._norm_key(key)
+        lk = str(key).lower().strip()
+        return super().__contains__(nk) or super().__contains__(lk) or super().__contains__(key)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        try:
+            val = self[key]
+            return val if val is not None else default
+        except KeyError:
+            return default
+
+
+# --------------------------------------------------------------------------- #
 # Data structures
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -39,11 +193,12 @@ class DetectedObject:
     bbox: tuple[int, int, int, int]   # x, y, w, h  (top-left corner + size)
     centroid: tuple[int, int]
     timestamp: float = 0.0
-    source: str = "chroma"            # "chroma" | "yolo" | "fused"
+    source: str = "chroma"            # "chroma" | "yolo" | "fused" | "hand_tracker"
     raw_label: str = ""               # original YOLO COCO label
     track_id: int = -1
     velocity: tuple[float, float] = (0.0, 0.0)
     semantic_identity: str = ""
+    frame_id: int = 0
 
     @property
     def is_yolo(self) -> bool:
@@ -83,17 +238,131 @@ class DetectedObject:
     def y2(self) -> int:
         return self.bbox[1] + self.bbox[3]
 
+    @property
+    def center_x(self) -> int:
+        return self.centroid[0]
+
+    @property
+    def center_y(self) -> int:
+        return self.centroid[1]
+
+    @property
+    def bounding_box_xyxy(self) -> list[int]:
+        return [self.x, self.y, self.x2, self.y2]
+
+    def to_detection_dict(self, frame_id: Optional[int] = None) -> dict[str, Any]:
+        """
+        Unified per-frame detection dictionary required by ORBITA specification:
+        {
+          "class_name": str,
+          "confidence": float,
+          "x1": int,
+          "y1": int,
+          "x2": int,
+          "y2": int,
+          "center_x": int,
+          "center_y": int,
+          "timestamp": float,
+          "frame_id": int,
+          "bounding_box": [x1, y1, x2, y2],
+          "frame_timestamp": float
+        }
+        """
+        norm_name = map_raw_to_app_class(str(self.class_name))
+        f_id = self.frame_id if self.frame_id > 0 else (frame_id or 0)
+
+        return {
+            "class_name": NormalizedClassName(norm_name.lower()),
+            "confidence": round(float(self.confidence), 3),
+            "bbox": [int(self.x), int(self.y), int(self.x2), int(self.y2)],
+            "center": [int(self.center_x), int(self.center_y)],
+            "frame_id": int(f_id),
+            "timestamp": float(self.timestamp),
+            "x1": int(self.x),
+            "y1": int(self.y),
+            "x2": int(self.x2),
+            "y2": int(self.y2),
+            "center_x": int(self.center_x),
+            "center_y": int(self.center_y),
+            "bounding_box": [int(self.x), int(self.y), int(self.x2), int(self.y2)],
+            "frame_timestamp": float(self.timestamp),
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Helper functions: IoU and Class-Aware NMS
+# --------------------------------------------------------------------------- #
+def compute_iou_bbox(boxA: tuple[int, int, int, int], boxB: tuple[int, int, int, int]) -> float:
+    """Computes IoU between two (x, y, w, h) bounding boxes."""
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[0] + boxA[2], boxB[0] + boxB[2])
+    yB = min(boxA[1] + boxA[3], boxB[1] + boxB[3])
+
+    interArea = max(0, xB - xA) * max(0, yB - yA)
+    boxAArea = boxA[2] * boxA[3]
+    boxBArea = boxB[2] * boxB[3]
+    unionArea = float(boxAArea + boxBArea - interArea)
+    if unionArea <= 0.0:
+        return 0.0
+    return interArea / unionArea
+
+
+def apply_class_aware_nms(
+    detections: list[DetectedObject],
+    iou_threshold: float = 0.45,
+    min_confidence: float = 0.20,
+) -> list[DetectedObject]:
+    """
+    Performs per-class Non-Maximum Suppression (NMS).
+    Keeps only the highest-quality detection among heavily overlapping boxes of the same class.
+    Preserves multiple different classes even if they overlap.
+    """
+    if not detections:
+        return []
+
+    valid_dets = [d for d in detections if getattr(d, "confidence", 0.0) >= min_confidence]
+    if len(valid_dets) <= 1:
+        return valid_dets
+
+    # Group by canonical class
+    grouped: dict[str, list[DetectedObject]] = {}
+    for d in valid_dets:
+        c_name = str(getattr(d, "semantic_identity", "") or getattr(d, "class_name", "")).upper()
+        canon = "BLUE_BOX" if c_name in ("MAIN_BOX", "BLUE_BOX") else (
+            "PEN" if c_name in ("TOOL", "PEN") else (
+                "WATCH" if c_name in ("SAMPLE", "WATCH") else c_name
+            )
+        )
+        grouped.setdefault(canon, []).append(d)
+
+    kept: list[DetectedObject] = []
+    for canon_cls, group in grouped.items():
+        # Sort group by confidence descending (secondary tie-breaker: area)
+        sorted_group = sorted(group, key=lambda x: (x.confidence, x.area), reverse=True)
+        selected_for_class: list[DetectedObject] = []
+
+        for candidate in sorted_group:
+            should_suppress = False
+            for selected in selected_for_class:
+                iou = compute_iou_bbox(candidate.bbox, selected.bbox)
+                if iou >= iou_threshold:
+                    should_suppress = True
+                    break
+            if not should_suppress:
+                selected_for_class.append(candidate)
+
+        kept.extend(selected_for_class)
+
+    return kept
+
 
 # --------------------------------------------------------------------------- #
 # Colour ranges for HSV chroma detection
 # --------------------------------------------------------------------------- #
 DEFAULT_HSV_RANGES: dict[str, tuple[np.ndarray, np.ndarray]] = {
-    "BLUE_BOX": (               # Expanded blue container
-        np.array([95,  55,   30]),
-        np.array([135, 255, 255]),
-    ),
-    "MAIN_BOX": (               # Backward compatible alias for blue container
-        np.array([95,  55,   30]),
+    "BLUE_BOX": (               # Primary blue container (MAIN_BOX canonical)
+        np.array([90,  45,   30]),
         np.array([135, 255, 255]),
     ),
     "YELLOW_BOX": (
@@ -120,16 +389,27 @@ DEFAULT_HSV_RANGES: dict[str, tuple[np.ndarray, np.ndarray]] = {
 # --------------------------------------------------------------------------- #
 class ObjectDetector:
     """
-    Detects experiment objects in each video frame with YOLO + color intelligence.
+    Detects experiment objects in each video frame with YOLO + multi-class intelligence.
+    Continuously detects all 5 required classes:
+      1. yellow_box
+      2. blue_box
+      3. pen
+      4. watch
+      5. hand
     """
 
     def __init__(self, config: Any, hsv_ranges: dict | None = None):
         self.config = config
         self.min_area = getattr(config, "min_area_px", 400)
-        # Sensitive confidence threshold for real-world handheld objects
-        self.confidence_threshold = min(0.30, getattr(config, "confidence_threshold", 0.35))
+        self.confidence_threshold = min(0.25, getattr(config, "confidence_threshold", 0.25))
+        self.iou_threshold = getattr(config, "iou_threshold", 0.45)
 
-        # Build HSV range lookup
+        # Class-specific confidence thresholds
+        self.class_thresholds: dict[str, float] = dict(DEFAULT_CLASS_THRESHOLDS)
+        if hasattr(config, "class_thresholds") and isinstance(config.class_thresholds, dict):
+            self.class_thresholds.update(config.class_thresholds)
+
+        # Build HSV range lookup for fallback/synthetic testing
         self._hsv_ranges = self._build_hsv_ranges(
             config.color_ranges if hasattr(config, "color_ranges") else {},
             hsv_ranges or {},
@@ -138,17 +418,26 @@ class ObjectDetector:
         # YOLO model initialization
         self._yolo = None
         self._device = "cpu"
+        self._active_model_path: str = ""
+        self.missing_model_classes: list[str] = []
         if getattr(config, "use_yolo", True):
-            self._try_load_yolo(getattr(config, "yolo_model_path", "models/yolov8n.pt"))
+            self._try_load_yolo(getattr(config, "yolo_model_path", "models/orbita_yolo_detector_v3.pt"))
 
         # Multi-object tracker for persistent identity and trajectory velocity
         from core_ai.perception.object_tracker import MultiObjectTracker
         self.tracker = MultiObjectTracker(max_age=15, min_hits=1, iou_threshold=0.25)
 
-        # Temporal smoother to eliminate jitter & brief occlusions
-        self._tracked_objects: Dict[str, Dict[str, Any]] = {}
+        # Multi-class temporal smoother: keeps detections across 1–3 missed frames
+        self._tracked_objects: dict[str, dict[str, Any]] = {}
         self._frame_count: int = 0
         self.current_ai_source: str = "PRIMARY_AI" if self._yolo is not None else "FALLBACK_AI"
+
+        # Telemetry & debug caching
+        self.last_raw_yolo_detections: list[dict] = []
+        self.last_mapped_detections: list[dict] = []
+        self.last_nms_detections: list[dict] = []
+        self.last_tracked_detections: list[dict] = []
+        self.last_grouped_detections: dict[str, list[dict[str, Any]]] = {c: [] for c in REQUIRED_YOLO_CLASSES}
 
     # ----------------------------------------------------------------------- #
     # Public API
@@ -158,99 +447,216 @@ class ObjectDetector:
         frame: np.ndarray,
         timestamp: float = 0.0,
         hands: Optional[tuple[Any, Any]] = None,
+        frame_id: int = 0,
     ) -> list[DetectedObject]:
         """
-        Run robust detection and multi-object tracking on a single BGR frame.
+        Run continuous multi-object detection, per-class NMS, hand integration,
+        and temporal smoothing (1-3 frames) on a single frame.
+        Evaluates all five classes simultaneously: BLUE_BOX, YELLOW_BOX, PEN, WATCH, HAND.
         """
         self._frame_count += 1
+        f_id = frame_id if frame_id > 0 else self._frame_count
         objects: list[DetectedObject] = []
 
-        if self._yolo is not None:
-            # 1. Primary: High-accuracy YOLO detection with semantic mapping
-            yolo_objs = self._detect_yolo(frame, timestamp)
+        # 1. Primary: Run YOLO inference if model loaded or overridden
+        if self._yolo is not None or "_detect_yolo" in self.__dict__ or getattr(self.config, "use_yolo", False):
+            try:
+                yolo_objs = self._detect_yolo(frame, timestamp, frame_id=f_id)
+            except TypeError:
+                yolo_objs = self._detect_yolo(frame, timestamp)
+            for o in yolo_objs:
+                o.frame_id = f_id
             objects.extend(yolo_objs)
 
-            # 2. Secondary: Supplemental chroma check for missed experiment boxes
-            found_classes = {o.class_name for o in yolo_objs}
-            missing_boxes = {"RED_BOX", "YELLOW_BOX", "MAIN_BOX"} - found_classes
-            
-            # Optimization: If missing boxes are already actively tracked with high confidence, skip expensive chroma
-            if missing_boxes and hasattr(self, "tracker") and hasattr(self.tracker, "tracks"):
-                tracked_classes = {
-                    t.class_name for t in self.tracker.tracks.values()
-                    if getattr(t, "time_since_update", 0) <= 2
+            # Supplemental chroma check if configured: detect any missing color-distinguishable targets
+            if getattr(self.config, "allow_chroma_fallback", False):
+                found_classes = {
+                    map_raw_to_app_class(str(getattr(o, "semantic_identity", "") or getattr(o, "class_name", "")))
+                    for o in objects
                 }
-                missing_boxes = missing_boxes - tracked_classes
-
-            # Auxiliary chroma scheduling:
-            # - Immediate recovery if a missing box was tracked recently (<=15 frames)
-            # - Low-cadence periodic discovery (every 6 frames) for new boxes
-            recently_seen_classes = set()
-            if hasattr(self, "tracker") and hasattr(self.tracker, "tracks"):
-                recently_seen_classes = {
-                    t.class_name for t in self.tracker.tracks.values()
-                    if getattr(t, "time_since_update", 999) <= 15
-                }
-            should_run_chroma = (
-                bool(missing_boxes & recently_seen_classes)
-                or (self._frame_count % 6 == 0)
-            )
-
-            if missing_boxes and should_run_chroma:
-                chroma_objs = self._detect_chroma(
-                    frame,
-                    timestamp,
-                    filter_classes=missing_boxes,
-                    min_area_override=3000,
-                    min_confidence_override=0.72,
-                    hands=hands,
-                )
-                # Keep chroma detections only if non-overlapping with existing YOLO detections
-                for co in chroma_objs:
-                    if not any(self._iou(co, yo) > 0.20 for yo in yolo_objs):
-                        objects.append(co)
+                missing_chroma: set[str] = set()
+                if "BLUE_BOX" not in found_classes:
+                    missing_chroma.add("BLUE_BOX")
+                if "YELLOW_BOX" not in found_classes:
+                    missing_chroma.add("YELLOW_BOX")
+                if missing_chroma:
+                    try:
+                        chroma_objs = self._detect_chroma(
+                            frame, timestamp, filter_classes=missing_chroma, hands=hands, frame_id=f_id
+                        )
+                    except TypeError:
+                        chroma_objs = self._detect_chroma(
+                            frame, timestamp, filter_classes=missing_chroma, hands=hands
+                        )
+                    objects.extend(chroma_objs)
         else:
-            # Fallback if YOLO not available
-            objects.extend(self._detect_chroma(frame, timestamp, hands=hands))
+            # Fallback if YOLO model is disabled in config
+            try:
+                objects.extend(self._detect_chroma(frame, timestamp, hands=hands, frame_id=f_id))
+            except TypeError:
+                objects.extend(self._detect_chroma(frame, timestamp, hands=hands))
 
-        # 3. Classify AI detection source telemetry
-        has_yolo = any(getattr(o, "source", "") == "yolo" for o in objects)
-        has_chroma = any(getattr(o, "source", "") == "chroma" for o in objects)
-        if has_yolo and has_chroma:
-            self.current_ai_source = "HYBRID"
-        elif has_yolo:
+        # 2. Hand Detection: Treat Hand as a first-class detection in unified state
+        if hands:
+            left_h, right_h = hands
+            for h in (left_h, right_h):
+                if h is not None and getattr(h, "is_visible", False):
+                    hx, hy, hw, hh = getattr(h, "bbox", (0, 0, 0, 0))
+                    if hw > 8 and hh > 8:
+                        h_conf = float(getattr(h, "confidence", 0.85))
+                        hcx = int(hx + hw // 2)
+                        hcy = int(hy + hh // 2)
+                        pos = getattr(h, "position", None)
+                        if pos is not None and len(pos) >= 2:
+                            hcx, hcy = int(pos[0]), int(pos[1])
+
+                        h_thresh = self.class_thresholds.get("hand", 0.30)
+                        if h_conf >= h_thresh:
+                            objects.append(DetectedObject(
+                                class_name=NormalizedClassName("hand"),
+                                confidence=h_conf,
+                                bbox=(int(hx), int(hy), int(hw), int(hh)),
+                                centroid=(hcx, hcy),
+                                timestamp=timestamp,
+                                source="hand_tracker",
+                                raw_label="hand",
+                                semantic_identity="HAND",
+                                track_id=getattr(h, "hand_id", -1),
+                                velocity=getattr(h, "velocity", (0.0, 0.0)),
+                                frame_id=f_id,
+                            ))
+
+        # 3. Class-aware NMS: suppresses duplicates per-class while preserving different overlapping classes
+        canonical_detections = apply_class_aware_nms(
+            objects,
+            iou_threshold=self.iou_threshold,
+            min_confidence=min(self.class_thresholds.values()),
+        )
+
+        # 4. Short-term temporal smoothing & tracking (persists 1–3 missed frames to eliminate flicker)
+        smoothed = self._smooth_detections(canonical_detections, timestamp)
+
+        # 5. Extract unified grouped detections dictionary for all 7 required classes
+        grouped = NormalizedDetectionsDict({
+            "LOCATION_A": [],
+            "LOCATION_B": [],
+            "PEN": [],
+            "WATCH": [],
+            "BLUE_BOX": [],
+            "YELLOW_BOX": [],
+            "HAND": [],
+        })
+        for det in smoothed:
+            det.frame_id = f_id
+            det_dict = det.to_detection_dict(frame_id=f_id)
+            c_upper = map_raw_to_app_class(str(getattr(det, "semantic_identity", "") or det.class_name))
+            if c_upper in grouped:
+                grouped[c_upper].append(det_dict)
+            else:
+                grouped.setdefault(c_upper, []).append(det_dict)
+
+        # Also mirror to lowercase aliases so legacy consumers function seamlessly
+        for c in REQUIRED_YOLO_CLASSES:
+            grouped[c.lower()] = grouped[c]
+
+        self.last_grouped_detections = grouped
+
+        # 6. Classify AI detection source telemetry
+        has_yolo = any(getattr(o, "source", "") == "yolo" for o in smoothed)
+        has_hand = any(getattr(o, "source", "") == "hand_tracker" for o in smoothed)
+        has_chroma = any(getattr(o, "source", "") == "chroma" for o in smoothed)
+
+        if has_yolo:
             self.current_ai_source = "PRIMARY_AI"
         elif has_chroma:
             self.current_ai_source = "FALLBACK_AI"
+        elif has_hand:
+            self.current_ai_source = "HAND_AI"
         else:
             self.current_ai_source = "UNCERTAIN"
 
-        # 4. Apply temporal smoothing to stabilize bounding boxes
-        smoothed = self._smooth_detections(objects, timestamp)
-
-        # 5. Apply multi-object tracking: persistent track IDs, velocity vectors
+        # 7. Apply persistent multi-object tracking
         tracked = self.tracker.update(smoothed, timestamp)
+
+        self.last_tracked_detections = [
+            {"class": str(o.class_name), "conf": round(float(o.confidence), 3), "track_id": getattr(o, "track_id", -1), "bbox": list(o.bbox)}
+            for o in tracked
+        ]
+
         return tracked
+
+    def get_grouped_detections(self) -> dict[str, list[dict[str, Any]]]:
+        """
+        Returns latest detections grouped by class across all 7 entities.
+        """
+        return self.last_grouped_detections
+
+    def get_structured_detections(self) -> dict[str, list[dict[str, Any]]]:
+        """
+        Structured detection dictionary required by ORBITA specification:
+        {
+          "LOCATION_A": [],
+          "LOCATION_B": [],
+          "PEN": [],
+          "WATCH": [],
+          "BLUE_BOX": [],
+          "YELLOW_BOX": [],
+          "HAND": []
+        }
+        Each detection:
+        {
+          "class_name": "...",
+          "confidence": 0.00,
+          "bbox": [x1, y1, x2, y2],
+          "center": [cx, cy],
+          "frame_id": "...",
+          "timestamp": "..."
+        }
+        Preserves multiple detections per class without using only detections[0].
+        """
+        out: dict[str, list[dict[str, Any]]] = {c: [] for c in REQUIRED_YOLO_CLASSES}
+        for c in REQUIRED_YOLO_CLASSES:
+            dets = self.last_grouped_detections.get(c, [])
+            for d in dets:
+                bx = list(d.get("bbox", d.get("bounding_box", [d.get("x1", 0), d.get("y1", 0), d.get("x2", 0), d.get("y2", 0)])))
+                cen = list(d.get("center", [d.get("center_x", 0), d.get("center_y", 0)]))
+                out[c].append({
+                    "class_name": str(c),
+                    "confidence": round(float(d.get("confidence", 0.0)), 2),
+                    "bbox": bx,
+                    "center": cen,
+                    "frame_id": str(d.get("frame_id", "")),
+                    "timestamp": str(d.get("timestamp", d.get("frame_timestamp", ""))),
+                })
+        return out
 
     def get_ai_source(self) -> str:
         """Return the current AI source category: PRIMARY_AI | HYBRID | FALLBACK_AI | UNCERTAIN."""
         return self.current_ai_source
 
     # ----------------------------------------------------------------------- #
-    # YOLO detection with Semantic & Color Mapping
+    # YOLO multi-class detection
     # ----------------------------------------------------------------------- #
     def _detect_yolo(
-        self, frame: np.ndarray, timestamp: float
+        self, frame: np.ndarray, timestamp: float, frame_id: int = 0
     ) -> list[DetectedObject]:
+        """
+        Runs YOLO model inference on the latest frame.
+        Extracts detections for ALL classes independently.
+        Never selects only the first or highest-confidence detection.
+        """
         if self._yolo is None:
             return []
 
         try:
+            # Run inference with the lowest class-specific threshold to capture all relevant objects
+            base_conf = min(self.class_thresholds.values())
             results = self._yolo.predict(
                 frame,
-                conf=self.confidence_threshold,
+                conf=base_conf,
                 device=self._device,
-                imgsz=getattr(self.config, "yolo_imgsz", 480),
+                imgsz=getattr(self.config, "yolo_imgsz", 640),
+                iou=self.iou_threshold,
                 verbose=False,
                 stream=False,
             )
@@ -261,9 +667,10 @@ class ObjectDetector:
             for r in results:
                 if not r.boxes:
                     continue
+                # Iterate through ALL boxes in results without taking only the first/highest
                 for box in r.boxes:
                     cls_id = int(box.cls[0])
-                    raw_name = r.names.get(cls_id, f"CLASS_{cls_id}").upper()
+                    raw_name = r.names.get(cls_id, f"CLASS_{cls_id}").strip()
                     conf = float(box.conf[0])
                     x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
                     w, h = max(1, x2 - x1), max(1, y2 - y1)
@@ -275,125 +682,76 @@ class ObjectDetector:
                         "bbox": [x1, y1, w, h]
                     })
 
-                    # Map raw YOLO/COCO object to ORBITA semantic experiment class
-                    mapped_class, adj_conf = self._classify_yolo_object(
-                        frame, raw_name, conf, x1, y1, w, h
-                    )
+                    # Map raw model class name to canonical ORBITA ontology
+                    mapped_class = self._map_yolo_class(raw_name)
+
+                    # Filter each class independently by its configured threshold
+                    c_thresh = self.class_thresholds.get(mapped_class.lower(), self.confidence_threshold)
+                    if conf < c_thresh:
+                        continue
+
+                    # Critical BLUE_BOX False-Positive Rejection (Requirement 2):
+                    # The physical blue box is a 3D container, NOT a large white location sheet or wood grain.
+                    if mapped_class.upper() == "BLUE_BOX":
+                        frame_h, frame_w = frame.shape[:2]
+                        aspect = w / float(h + 1e-5)
+                        # Reject wrong aspect/shape (containers are 0.45 to 2.2, paper sheets are wider or distorted)
+                        if aspect > 2.3 or aspect < 0.45:
+                            continue
+                        # Reject detections covering excessively large regions (e.g. table sheets)
+                        if w > 0.45 * frame_w and h > 0.20 * frame_h:
+                            continue
+                        # Visual consistency: Real blue box is predominantly blue.
+                        # White paper sheets have very low color saturation (mean S < 35) and high brightness.
+                        roi = frame[max(0, y1):min(frame_h, y2), max(0, x1):min(frame_w, x2)]
+                        if roi.size > 0:
+                            b_mean, g_mean, r_mean = cv2.mean(roi)[:3]
+                            # If region is nearly pure white (paper), reject as BLUE_BOX
+                            if b_mean > 175 and g_mean > 175 and r_mean > 175 and (b_mean - r_mean) < 25:
+                                continue
 
                     mapped_telemetry.append({
                         "semantic_class": mapped_class,
                         "raw_class": raw_name,
-                        "confidence": round(adj_conf, 3),
+                        "confidence": round(conf, 3),
                         "bbox": [x1, y1, w, h]
                     })
 
                     objs.append(DetectedObject(
-                        class_name=mapped_class,
-                        confidence=adj_conf,
+                        class_name=NormalizedClassName(mapped_class),
+                        confidence=conf,
                         bbox=(x1, y1, w, h),
                         centroid=(cx, cy),
                         timestamp=timestamp,
                         source="yolo",
                         raw_label=raw_name.lower(),
-                        semantic_identity=mapped_class,
+                        semantic_identity=mapped_class.upper(),
+                        frame_id=frame_id,
                     ))
+
+            # Apply per-class Non-Maximum Suppression (NMS) immediately after extraction
+            objs = apply_class_aware_nms(objs, iou_threshold=self.iou_threshold, min_confidence=base_conf)
 
             self.last_raw_yolo_detections = raw_telemetry
             self.last_mapped_detections = mapped_telemetry
+            self.last_nms_detections = [
+                {"class": str(o.class_name), "conf": round(float(o.confidence), 3), "bbox": list(o.bbox)}
+                for o in objs
+            ]
             return objs
         except Exception as exc:
             logger.warning("YOLO inference error: %s", exc)
             return []
 
-    def _classify_yolo_object(
-        self,
-        frame: np.ndarray,
-        raw_name: str,
-        conf: float,
-        x1: int,
-        y1: int,
-        w: int,
-        h: int,
-    ) -> tuple[str, float]:
+    def _map_yolo_class(self, raw_name: str) -> str:
         """
-        Transparently separates RAW YOLO detections from SECONDARY PERCEPTION
-        and maps to ORBITA official semantic ontology:
-          - BLUE_BOX    -> Blue container / main box / book/laptop with blue hue
-          - YELLOW_BOX  -> Yellow container / box with yellow hue
-          - PEN         -> Pen / pencil / stylus / tool / scissors / elongated instrument
-          - WATCH       -> Watch / clock / small circular sample
-          - PERSON      -> Human operator
+        Maps raw YOLO model detection classes to ORBITA ontology.
+        Does NOT fake detections using color segmentation.
         """
-        raw_lower = raw_name.lower().strip()
-
-        # 1. Exact match with ORBITA official ontology
-        if raw_name in ("BLUE_BOX", "YELLOW_BOX", "PEN", "WATCH", "PERSON"):
-            return raw_name, conf
-
-        if raw_lower == "person":
-            return "PERSON", conf
-
-        # 2. Extract central crop color characteristics
-        frame_h, frame_w = frame.shape[:2]
-        cx1 = max(0, min(frame_w - 1, x1))
-        cy1 = max(0, min(frame_h - 1, y1))
-        cx2 = max(0, min(frame_w, x1 + w))
-        cy2 = max(0, min(frame_h, y1 + h))
-
-        color = "UNKNOWN"
-        if cx2 > cx1 and cy2 > cy1:
-            crop = frame[cy1:cy2, cx1:cx2]
-            ih, iw = crop.shape[:2]
-            if ih > 10 and iw > 10:
-                inner = crop[int(ih * 0.15):int(ih * 0.85), int(iw * 0.15):int(iw * 0.85)]
-            else:
-                inner = crop
-
-            hsv = cv2.cvtColor(inner, cv2.COLOR_BGR2HSV)
-            h_c, s_c, v_c = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
-            total = h_c.size
-            if total > 0:
-                red_px = np.count_nonzero(((h_c <= 10) | (h_c >= 170)) & (s_c > 130) & (v_c > 50))
-                yellow_px = np.count_nonzero((h_c >= 16) & (h_c <= 38) & (s_c > 70) & (v_c > 50))
-                blue_px = np.count_nonzero((h_c >= 95) & (h_c <= 135) & (s_c > 55) & (v_c > 35))
-
-                if red_px / total > 0.20:
-                    color = "RED"
-                elif yellow_px / total > 0.15:
-                    color = "YELLOW"
-                elif blue_px / total > 0.20:
-                    color = "BLUE"
-
-        # 3. Categorize by semantic class and color
-        # Pen / Tools
-        if raw_lower in ("pen", "pencil", "marker", "stylus", "scissors", "knife", "fork", "spoon", "toothbrush", "remote", "cell phone") or raw_name == "TOOL":
-            return "PEN", max(conf, 0.85)
-
-        # Watch / Clock / Small circular specimens
-        if raw_lower in ("clock", "watch", "wristwatch", "timer", "stopwatch") or (raw_name == "SAMPLE" and w * h < 18000):
-            return "WATCH", max(conf, 0.85)
-
-        # Containers & Boxes
-        if raw_name == "MAIN_BOX" or color == "BLUE":
-            return "BLUE_BOX", max(conf, 0.88)
-        if raw_name == "YELLOW_BOX" or color == "YELLOW":
-            return "YELLOW_BOX", max(conf, 0.88)
-        if raw_name == "RED_BOX" or color == "RED":
-            return "RED_BOX", max(conf, 0.88)
-
-        if raw_lower in ("box", "suitcase", "backpack", "handbag", "book", "package", "laptop", "container"):
-            if color == "YELLOW":
-                return "YELLOW_BOX", max(conf, 0.88)
-            if color == "BLUE":
-                return "BLUE_BOX", max(conf, 0.88)
-            if color == "RED":
-                return "RED_BOX", max(conf, 0.88)
-            return "BLUE_BOX", max(conf, 0.82)
-
-        return raw_name, conf
+        return map_raw_to_app_class(raw_name).lower()
 
     # ----------------------------------------------------------------------- #
-    # Chroma detection
+    # Chroma detection (Synthetic/Testing Fallback)
     # ----------------------------------------------------------------------- #
     def _detect_chroma(
         self,
@@ -403,6 +761,7 @@ class ObjectDetector:
         min_area_override: Optional[int] = None,
         min_confidence_override: Optional[float] = None,
         hands: Optional[tuple[Any, Any]] = None,
+        frame_id: int = 0,
     ) -> list[DetectedObject]:
         H, W = frame.shape[:2]
         downscale = max(1, int(round(W / 480.0))) if (W > 640 and H > 360) else 1
@@ -449,7 +808,6 @@ class ObjectDetector:
             candidates: list[tuple[float, DetectedObject]] = []
             for cnt in contours:
                 raw_area = cv2.contourArea(cnt)
-                # Ignore tiny specks or huge background areas (>40% screen)
                 if raw_area < eff_min_area_scaled or raw_area > ((frame_area / (downscale * downscale)) * 0.40):
                     continue
 
@@ -457,85 +815,51 @@ class ObjectDetector:
                 rx, ry, rw, rh = cv2.boundingRect(cnt)
                 x, y, w, h = rx * downscale, ry * downscale, rw * downscale, rh * downscale
 
-                # Ignore table fixtures / top bezel (top 8% of frame)
                 if y < int(H * 0.08):
                     continue
 
-                # Ignore extreme aspect ratios (lines, borders, elongated arms)
                 aspect = w / (h + 1e-5)
                 if aspect > 2.5 or aspect < 0.40:
                     continue
 
-                # Reject arms entering from left/right image borders
                 if (x <= 5 or x + w >= W - 5) and (aspect > 1.8 or aspect < 0.55):
                     continue
 
                 cx, cy = x + w // 2, y + h // 2
 
-                # 1. Geometric Shape Validation: Container boxes are solid planar rectangles
                 rect = cv2.minAreaRect(cnt)
                 box_area = max(1.0, float(rect[1][0] * rect[1][1]))
                 rectangularity = float(raw_area / box_area)
                 solidity = float(raw_area / (rw * rh + 1e-5))
 
-                if canonical in ("RED_BOX", "YELLOW_BOX", "MAIN_BOX"):
-                    # True experiment containers possess high rectangularity and solidity
-                    # Knuckles, palm lines, and finger contours have low rectangularity (<0.50)
+                if canonical in ("RED_BOX", "YELLOW_BOX", "MAIN_BOX", "BLUE_BOX"):
                     if rectangularity < 0.52 or solidity < 0.42:
                         continue
 
-                # 2. Organic Skin Chrominance Rejection for RED_BOX
-                # Industrial plastic containers exhibit high red saturation and red channel dominance.
-                # Human skin and palm creases have lower red purity and high green/blue values.
                 if canonical == "RED_BOX":
-                    crop_bgr = frame[y:y+h, x:x+w]
-                    if crop_bgr.size > 0:
-                        b_mean = float(np.mean(crop_bgr[:, :, 0]))
-                        g_mean = float(np.mean(crop_bgr[:, :, 1]))
-                        r_mean = float(np.mean(crop_bgr[:, :, 2]))
-                        # Ensure red dominance over green/blue and minimum red intensity
-                        if r_mean < 100.0 or (r_mean / max(1.0, g_mean)) < 1.30 or (r_mean / max(1.0, b_mean)) < 1.30:
+                    roi = frame[max(0, y):min(H, y + h), max(0, x):min(W, x + w)]
+                    if roi.size > 0:
+                        mean_b, mean_g, mean_r = cv2.mean(roi)[:3]
+                        red_dominance = float(mean_r) - max(float(mean_g), float(mean_b))
+                        if red_dominance < 75.0 or mean_r < 160.0:
                             continue
 
-                # 3. Hand-Object Disambiguation & Coexistence
-                # If hand tracking data is available, verify candidate is not a sub-contour of a hand.
-                if hands and canonical == "RED_BOX":
-                    left_h, right_h = hands
-                    is_subsumed_by_hand = False
-                    for hand in (left_h, right_h):
-                        if hand is not None and getattr(hand, "is_visible", False):
-                            hx, hy, hw, hh = getattr(hand, "bbox", (0, 0, 0, 0))
-                            ix1 = max(x, hx)
-                            iy1 = max(y, hy)
-                            ix2 = min(x + w, hx + hw)
-                            iy2 = min(y + h, hy + hh)
-                            inter_area = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-                            # If candidate is mostly inside the hand bounding box:
-                            if inter_area / (w * h + 1e-5) > 0.55:
-                                # Keep as RED_BOX only if it has strong standalone evidence
-                                # of being an actual container (large area outside or high rectangularity)
-                                if rectangularity < 0.68 or area < 4500:
-                                    is_subsumed_by_hand = True
-                                    break
-                    if is_subsumed_by_hand:
-                        continue
-
-                # Score confidence from rectangularity and solidity
                 confidence = float(np.clip(0.60 + 0.22 * rectangularity + 0.15 * solidity, 0.60, 0.95))
-
                 if confidence < eff_min_conf:
                     continue
 
                 candidates.append((area, DetectedObject(
-                    class_name=canonical,
+                    class_name=NormalizedClassName(canonical),
                     confidence=confidence,
                     bbox=(x, y, w, h),
                     centroid=(cx, cy),
                     timestamp=timestamp,
                     source="chroma",
+                    raw_label=canonical.lower(),
+                    semantic_identity=canonical.upper(),
+                    frame_id=frame_id,
                 )))
 
-            # If multiple candidates found for a canonical box class, prioritize by area / confidence
             if candidates:
                 candidates.sort(key=lambda c: c[0], reverse=True)
                 kept: list[DetectedObject] = []
@@ -551,7 +875,7 @@ class ObjectDetector:
         return results
 
     # ----------------------------------------------------------------------- #
-    # Temporal Smoothing
+    # Short-Term Temporal Tracking & Smoothing (1-3 Frames)
     # ----------------------------------------------------------------------- #
     def _smooth_detections(
         self,
@@ -559,12 +883,11 @@ class ObjectDetector:
         timestamp: float,
     ) -> list[DetectedObject]:
         """
-        Smooths bounding box coordinates across frames to eliminate jitter
-        and bridges brief detection dropouts (up to 2 frames).
-        Matches detections to existing tracks by spatial proximity, preventing
-        distinct objects of the same class from collapsing into each other.
+        Temporal tracking and coordinate smoothing.
+        Maintains detections across 1–3 temporarily missed frames so detections
+        do not flicker.
         """
-        alpha = 0.70  # EMA smoothing factor for current frame
+        alpha = 0.70  # EMA smoothing factor
         matched_prev_keys: set[str] = set()
         smoothed_results: list[DetectedObject] = []
 
@@ -575,14 +898,13 @@ class ObjectDetector:
 
             # Search existing tracks of the same class for spatial proximity
             for key, prev in self._tracked_objects.items():
-                if prev["class_name"] != obj.class_name or key in matched_prev_keys:
+                if str(prev["class_name"]).lower() != str(obj.class_name).lower() or key in matched_prev_keys:
                     continue
                 px, py, pw, ph = prev["bbox"]
-                # Spatial IoU or centroid distance check
                 iou = self._iou_bbox((px, py, pw, ph), (cx, cy, cw, ch))
                 dist = float(np.hypot((cx + cw // 2) - (px + pw // 2), (cy + ch // 2) - (py + ph // 2)))
 
-                if (iou > 0.15 or dist < 100.0) and dist < best_match_dist:
+                if (iou > 0.15 or dist < 120.0) and dist < best_match_dist:
                     best_match_key = key
                     best_match_dist = dist
 
@@ -620,15 +942,19 @@ class ObjectDetector:
                     "missed_count": 0,
                     "timestamp": timestamp,
                 }
+                matched_prev_keys.add(track_id)
                 smoothed_results.append(obj)
 
-        # Retain objects that disappeared for only 1 frame (prevents flicker)
+        # Retain objects temporarily missed for up to 3 frames (prevents flicker)
         for key in list(self._tracked_objects.keys()):
             if key not in matched_prev_keys:
                 prev = self._tracked_objects[key]
                 prev["missed_count"] += 1
-                if prev["missed_count"] <= 1:
-                    # Bridge 1-frame flicker by preserving previous smoothed detection
+                if prev["missed_count"] <= 3:
+                    # Decay confidence gently while temporarily occluded/missed
+                    decayed_conf = max(0.20, float(prev["confidence"] * 0.95))
+                    prev["confidence"] = decayed_conf
+                    prev["object"].confidence = decayed_conf
                     smoothed_results.append(prev["object"])
                 else:
                     del self._tracked_objects[key]
@@ -682,6 +1008,8 @@ class ObjectDetector:
 
             candidates = [
                 Path(model_path),
+                Path("models/orbita_yolo_detector_v4.pt"),
+                Path(__file__).parent.parent.parent / "models" / "orbita_yolo_detector_v4.pt",
                 Path("models/orbita_yolo_detector_v3.pt"),
                 Path(__file__).parent.parent.parent / "models" / "orbita_yolo_detector_v3.pt",
                 Path("models/yolov8n.pt"),
@@ -718,7 +1046,10 @@ class ObjectDetector:
                 self._device = "cpu"
                 logger.info("YOLO running on CPU.")
 
-            # Section 11 debug telemetry
+            # Print and audit model classes
+            if hasattr(self._yolo, "names"):
+                self.missing_model_classes = audit_model_classes(self._yolo.names)
+
             classes_list = list(self._yolo.names.values()) if hasattr(self._yolo, "names") else []
             logger.info(
                 "\n================ MODEL DEBUG ================\n"
@@ -757,6 +1088,7 @@ class ObjectDetector:
             "imgsz": getattr(self.config, "yolo_imgsz", 480),
             "conf": self.confidence_threshold,
             "iou": getattr(self.config, "iou_threshold", 0.45),
+            "missing_classes": getattr(self, "missing_model_classes", []),
         }
 
     def load_model(self, model_path: str) -> bool:
@@ -773,17 +1105,8 @@ class ObjectDetector:
             self._yolo = new_yolo
             self._active_model_path = str(p.resolve())
             logger.info("Successfully hot-reloaded YOLO detector from %s", p)
-            classes_list = list(new_yolo.names.values()) if hasattr(new_yolo, "names") else []
-            logger.info(
-                "\n================ MODEL DEBUG ================\n"
-                "MODEL:\npath=%s\nclasses=%s\ndevice=%s\nimgsz=%s\nconf=%.2f\niou=%.2f\n=============================================",
-                self._active_model_path,
-                classes_list,
-                self._device,
-                getattr(self.config, "yolo_imgsz", 480),
-                self.confidence_threshold,
-                getattr(self.config, "iou_threshold", 0.45),
-            )
+            if hasattr(new_yolo, "names"):
+                self.missing_model_classes = audit_model_classes(new_yolo.names)
             return True
         except Exception as exc:
             logger.error("Failed to hot-reload YOLO detector from %s: %s", model_path, exc)
@@ -791,47 +1114,56 @@ class ObjectDetector:
 
     def draw(self, frame: np.ndarray, detections: list[DetectedObject]) -> np.ndarray:
         """
-        Draws professional bounding boxes, labels, and confidence tags on frame.
+        Draws professional bounding boxes, labels, and confidence tags for ALL detected classes.
         """
         if frame is None or not detections:
             return frame
 
         vis = frame.copy()
         class_colors = {
-            "PERSON": (80, 220, 100),       # Vibrant Green
-            "MAIN_BOX": (240, 180, 40),     # Azure / Sky Blue (BGR)
-            "RED_BOX": (40, 50, 235),       # Vibrant Red
-            "YELLOW_BOX": (20, 215, 255),   # Vibrant Yellow
-            "SAMPLE": (230, 80, 210),       # Magenta / Violet
-            "TOOL": (255, 140, 0),          # Cyan / Blue
+            "location_a": (220, 180, 50),   # Soft Cyan/Teal (BGR)
+            "LOCATION_A": (220, 180, 50),
+            "location_b": (180, 80, 220),   # Violet/Purple (BGR)
+            "LOCATION_B": (180, 80, 220),
+            "yellow_box": (30, 220, 255),   # Vibrant Yellow (BGR)
+            "YELLOW_BOX": (30, 220, 255),
+            "blue_box": (240, 160, 30),     # Royal Blue (BGR)
+            "BLUE_BOX": (240, 160, 30),
+            "MAIN_BOX": (240, 160, 30),
+            "pen": (0, 165, 255),           # Vibrant Orange (BGR)
+            "PEN": (0, 165, 255),
+            "TOOL": (0, 165, 255),
+            "watch": (220, 60, 200),        # Magenta Violet (BGR)
+            "WATCH": (220, 60, 200),
+            "SAMPLE": (220, 60, 200),
+            "hand": (50, 230, 100),         # Neon Emerald (BGR)
+            "HAND": (50, 230, 100),
+            "red_box": (40, 50, 235),       # Vibrant Red (BGR)
+            "RED_BOX": (40, 50, 235),
+            "person": (80, 220, 100),       # Green (BGR)
+            "PERSON": (80, 220, 100),
         }
 
         for det in detections:
             x, y, w, h = det.bbox
-            color = class_colors.get(det.class_name, (180, 190, 200))
+            c_name_str = str(det.class_name)
+            canonical_label = map_raw_to_app_class(c_name_str)
+            color = class_colors.get(canonical_label, class_colors.get(c_name_str, (180, 190, 200)))
 
-            # Bounding box with clean sharp aerospace lines
+            # Draw bounding box
             cv2.rectangle(vis, (x, y), (x + w, y + h), color, 2, cv2.LINE_AA)
 
-            # Centroid point
+            # Draw center point
             cx, cy = getattr(det, "centroid", (x + w // 2, y + h // 2))
-            cv2.circle(vis, (cx, cy), 3, color, -1, cv2.LINE_AA)
+            cv2.circle(vis, (cx, cy), 4, color, -1, cv2.LINE_AA)
+            cv2.circle(vis, (cx, cy), 6, (10, 15, 20), 1, cv2.LINE_AA)
 
-            # Optional velocity motion indicator
-            vx, vy = getattr(det, "velocity", (0.0, 0.0))
-            if abs(vx) + abs(vy) > 15.0:
-                end_x = int(cx + np.clip(vx * 0.2, -40, 40))
-                end_y = int(cy + np.clip(vy * 0.2, -40, 40))
-                cv2.arrowedLine(vis, (cx, cy), (end_x, end_y), color, 1, cv2.LINE_AA, tipLength=0.3)
-
-            # Label text with Track ID and Confidence
+            # Draw label badge with class name + confidence
             conf_pct = int(det.confidence * 100)
             track_prefix = f"#{det.track_id} " if getattr(det, "track_id", -1) > 0 else ""
-            source_tag = " [HYBRID]" if getattr(det, "source", "") == "chroma" else " [YOLO]"
-            label = f"{track_prefix}{det.class_name}{source_tag} {conf_pct}%"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+            label = f"{track_prefix}{canonical_label} {conf_pct}%"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
 
-            # Header badge above box
             badge_y1 = max(0, y - th - 6)
             badge_y2 = y
             badge_x2 = min(vis.shape[1], x + tw + 8)
@@ -841,11 +1173,28 @@ class ObjectDetector:
                 label,
                 (x + 4, badge_y2 - 4),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.42,
+                0.40,
                 (10, 15, 20),
                 1,
                 cv2.LINE_AA,
             )
 
         return vis
+
+
+# --------------------------------------------------------------------------- #
+# Real-Time Debug Overlay Rendering (Disabled per user requirement)
+# --------------------------------------------------------------------------- #
+def draw_debug_overlay(
+    frame: np.ndarray,
+    grouped_detections: dict[str, list[dict[str, Any]]],
+    action_state: dict[str, Any],
+) -> np.ndarray:
+    """
+    Debug overlay panel is disabled so camera feed remains clean and unobstructed.
+    Returns the frame unchanged.
+    """
+    return frame
+
+
 

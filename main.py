@@ -67,7 +67,14 @@ def run_web(args):
     from core_ai.backend.api import app, _state
 
     # Pre-configure state before startup
-    _state.mode = "webcam" if args.camera else "sim"
+    _state.camera_arg = args.camera
+    if args.camera:
+        if str(args.camera).isdigit():
+            _state.mode = "webcam"
+        else:
+            _state.mode = "video_file"
+    else:
+        _state.mode = "sim"
     _state.current_scenario = args.scenario
 
     import threading

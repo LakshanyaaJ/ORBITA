@@ -24,6 +24,10 @@ export function useTelemetry() {
       ws.current.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
+          if (payload && payload.event === 'STEP_VALIDATED') {
+            console.log('STEP_VALIDATED event received:', payload);
+            return;
+          }
           setData(payload);
         } catch (e) {
           console.error('Failed to parse telemetry data', e);

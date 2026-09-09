@@ -33,7 +33,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import psutil
-from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
+import urllib.parse
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -176,6 +177,14 @@ class AppState:
         self._fps_timer: float = time.monotonic()
         self.readiness: dict[str, str] = {}
 
+        # Video file state tracking for stale-frame detection and auto-reconnect
+        self.last_video_path: str = "vdata/20260905_145858.mp4"
+        self.last_video_loop: bool = True
+        self._video_reconnect_attempts: int = 0
+        self._video_last_reconnect_at: float = 0.0
+        self._dropped_stale_frames: int = 0
+        self.source_play_state: str = "IDLE"  # IDLE|STARTING|PLAYING|STALE|ERROR
+
     @property
     def camera(self) -> Optional[Camera]:
         if self.camera_manager:
@@ -226,6 +235,7 @@ class AppState:
 
 
 _state = AppState()
+_inference_lock = threading.Lock()
 
 
 # =========================================================================== #
@@ -272,8 +282,12 @@ async def _startup() -> None:
 
     # Initialize CameraManager
     _state.camera_manager = CameraManager(cfg.camera if cfg else None)
-    if _state.mode == "webcam":
-        _state.camera_manager.connect_jetson_camera(0)
+    if _state.mode == "video_file":
+        video_path = getattr(_state, "camera_arg", None) or "vdata/20260905_145858.mp4"
+        _state.camera_manager.connect_video_file(video_path, loop=True)
+    elif _state.mode == "webcam":
+        dev_idx = int(getattr(_state, "camera_arg", 0)) if str(getattr(_state, "camera_arg", "")).isdigit() else 0
+        _state.camera_manager.connect_jetson_camera(dev_idx)
     elif _state.mode == "ip_camera":
         default_url = get_default_ip_camera_url()
         if default_url:
@@ -416,6 +430,10 @@ def _execute_ai_cycle() -> None:
     frame = None
     cam_name = ""
     latency_ms = 0.0
+    cam_source_tag = "SIMULATOR"
+    frame_idx = 0
+    total_frames = 0
+    video_time_str = "00:00.00"
 
     if active_source == "sim" and _state.simulator:
         sim_frame = _state.simulator.next_frame()
@@ -429,7 +447,8 @@ def _execute_ai_cycle() -> None:
         confidence = sim_frame.confidence
         t_stamp = sim_frame.timestamp
 
-        objects = _state.detector.detect(frame, t_stamp) if _state.detector else []
+        with _inference_lock:
+            objects = _state.detector.detect(frame, t_stamp) if _state.detector else []
         poses = []
         left, right = None, None
 
@@ -448,26 +467,82 @@ def _execute_ai_cycle() -> None:
         if frame is None:
             return
 
+        # MAX_FRAME_AGE: video files are locally decoded so 2000ms is generous;
+        # live cameras use 500ms to catch network stalls quickly.
+        MAX_FRAME_AGE_VIDEO_MS = 2000.0
+        MAX_FRAME_AGE_LIVE_MS  = 500.0
+
         if active_source == "video_file":
-            latency_ms = 0.0
-            is_stale = False
+            actual_age_ms = frame_buf.frame_age_ms
+            latency_ms = actual_age_ms
+            is_stale = actual_age_ms > MAX_FRAME_AGE_VIDEO_MS
             cam_name = "Demo MP4"
+            if is_stale:
+                _state._dropped_stale_frames += 1
+                _state.source_play_state = "STALE"
+                # Trigger auto-reconnect with exponential back-off (max 8 s)
+                now = time.monotonic()
+                backoff = min(8.0, 1.0 * (2 ** min(_state._video_reconnect_attempts, 3)))
+                if now - _state._video_last_reconnect_at >= backoff:
+                    _state._video_last_reconnect_at = now
+                    _state._video_reconnect_attempts += 1
+                    vpath = _state.last_video_path
+                    vloop = _state.last_video_loop
+                    logger.warning(
+                        "Video frame stale (%.0fms > %.0fms). Auto-reconnecting '%s' (attempt %d).",
+                        actual_age_ms, MAX_FRAME_AGE_VIDEO_MS, vpath, _state._video_reconnect_attempts
+                    )
+                    try:
+                        _state.camera_manager.connect_video_file(vpath, loop=vloop)
+                    except Exception as _recon_exc:
+                        logger.error("Auto-reconnect failed: %s", _recon_exc)
+                return  # Skip AI inference on stale frame
+            else:
+                _state._video_reconnect_attempts = 0
+                _state.source_play_state = "PLAYING"
         else:
-            latency_ms = max(0.0, (time.monotonic() - cap_ts) * 1000.0)
-            is_stale = latency_ms > 500.0
+            latency_ms = max(0.0, (time.monotonic() - cap_ts) * 1000.0) if cap_ts else 0.0
+            is_stale = latency_ms > MAX_FRAME_AGE_LIVE_MS
             if active_source in ("ip_camera", "phone_webcam"):
                 cam_name = "Phone Camera"
             else:
                 cam_name = "Jetson Camera"
         t_stamp = time.time()
 
-        # Perception: run pose & hand tracking first so detector has hand context
-        poses = _state.pose.estimate(frame, t_stamp) if _state.pose else []
-        pose = poses[0] if poses else None
-        person_bbox = pose.bbox if pose else None
-        left, right = _state.hand_tracker.track(pose, frame, t_stamp, person_bbox=person_bbox) if _state.hand_tracker else (None, None)
-        objects = _state.detector.detect(frame, t_stamp, hands=(left, right)) if _state.detector else []
-        interactions = _state.interaction_tracker.update(left, right, objects, t_stamp) if _state.interaction_tracker else []
+        # Extract source telemetry metadata early for frame synchronization
+        frame_idx = 0
+        total_frames = 0
+        video_time_str = "00:00.00"
+        cam_source_tag = "UNKNOWN"
+        if active_source == "video_file" and _state.camera_manager and _state.camera_manager._jetson_camera:
+            cam = _state.camera_manager._jetson_camera
+            frame_idx = getattr(cam, "frame_index", 0)
+            total_frames = getattr(cam, "total_video_frames", 0)
+            fps_val = getattr(cam, "actual_fps", 30.0) or 30.0
+            secs = frame_idx / max(1.0, fps_val)
+            video_time_str = f"{int(secs // 60):02d}:{secs % 60:05.2f}"
+            cam_source_tag = "MP4"
+        elif active_source == "ip_camera":
+            cam_source_tag = "IP CAMERA"
+            video_time_str = time.strftime("%M:%S", time.localtime())
+        elif active_source == "phone_webcam":
+            cam_source_tag = "PHONE"
+            video_time_str = time.strftime("%M:%S", time.localtime())
+        elif active_source == "jetson_camera":
+            cam_source_tag = "JETSON / USB"
+            video_time_str = time.strftime("%M:%S", time.localtime())
+        elif active_source == "sim":
+            cam_source_tag = "SIMULATOR"
+            video_time_str = "00:00.00"
+
+        # Perception: run pose & hand tracking first so detector has hand context (under lock)
+        with _inference_lock:
+            poses = _state.pose.estimate(frame, t_stamp) if _state.pose else []
+            pose = poses[0] if poses else None
+            person_bbox = pose.bbox if pose else None
+            left, right = _state.hand_tracker.track(pose, frame, t_stamp, person_bbox=person_bbox) if _state.hand_tracker else (None, None)
+            objects = _state.detector.detect(frame, t_stamp, hands=(left, right), frame_id=frame_idx) if _state.detector else []
+            interactions = _state.interaction_tracker.update(left, right, objects, t_stamp) if _state.interaction_tracker else []
 
         # Update physical track states with hand interactions
         tracks = []
@@ -491,32 +566,6 @@ def _execute_ai_cycle() -> None:
     else:
         return
 
-    # Extract source telemetry metadata
-    frame_idx = 0
-    total_frames = 0
-    video_time_str = "00:00.00"
-    cam_source_tag = "UNKNOWN"
-    if active_source == "video_file" and _state.camera_manager and _state.camera_manager._jetson_camera:
-        cam = _state.camera_manager._jetson_camera
-        frame_idx = getattr(cam, "frame_index", 0)
-        total_frames = getattr(cam, "total_video_frames", 0)
-        fps_val = getattr(cam, "actual_fps", 30.0) or 30.0
-        secs = frame_idx / max(1.0, fps_val)
-        video_time_str = f"{int(secs // 60):02d}:{secs % 60:05.2f}"
-        cam_source_tag = "MP4"
-    elif active_source == "ip_camera":
-        cam_source_tag = "IP CAMERA"
-        video_time_str = time.strftime("%M:%S", time.localtime())
-    elif active_source == "phone_webcam":
-        cam_source_tag = "PHONE"
-        video_time_str = time.strftime("%M:%S", time.localtime())
-    elif active_source == "jetson_camera":
-        cam_source_tag = "JETSON / USB"
-        video_time_str = time.strftime("%M:%S", time.localtime())
-    elif active_source == "sim":
-        cam_source_tag = "SIMULATOR"
-        video_time_str = "00:00.00"
-
     # Reasoning / State Manager
     result = None
     if _state.state_manager:
@@ -536,6 +585,9 @@ def _execute_ai_cycle() -> None:
             video_time=video_time_str,
             frame_age_ms=latency_ms,
             is_stale=is_stale if 'is_stale' in locals() else False,
+            raw_detections=getattr(_state.detector, "last_raw_yolo_detections", []) if _state.detector else [],
+            nms_detections=getattr(_state.detector, "last_nms_detections", []) if _state.detector else [],
+            grouped_detections=_state.detector.get_grouped_detections() if _state.detector else {},
         )
         _state.last_result = result
 
@@ -588,12 +640,17 @@ def _execute_ai_cycle() -> None:
                 next_step_id = result.fsm_state.current_step.id if result.fsm_state.current_step else 13
                 exp_act = result.confirmed_action.action if result.confirmed_action else result.fsm_state.detected_action
                 exp_tgt = result.confirmed_action.object_name if result.confirmed_action else result.fsm_state.detected_object
+                act_conf = getattr(result.confirmed_action, "confidence", 1.0) if result.confirmed_action else 1.0
                 step_evt = {
                     "event": "STEP_VALIDATED",
+                    "stepIndex": prev_step_id,
                     "step": prev_step_id,
-                    "expected_action": exp_act,
+                    "action": exp_act,
                     "target": exp_tgt,
+                    "confidence": round(act_conf, 3),
+                    "timestamp": time.time(),
                     "result": "CONFIRMED_CORRECT",
+                    "nextStep": next_step_id,
                     "next_step": next_step_id,
                 }
                 logger.info("Emitting STEP_VALIDATED event: %s", step_evt)
@@ -648,14 +705,36 @@ def _produce_single_stream_frame() -> None:
     frame = None
     cam_latency_ms = 0.0
 
+    # MAX_FRAME_AGE thresholds for the stream producer (separate from AI worker):
+    # Video files can tolerate up to 2000ms age before we show a stale-frame notice.
+    # Live cameras must deliver a frame within 1000ms or we consider it disconnected.
+    STREAM_MAX_FRAME_AGE_VIDEO_MS = 2000.0
+    STREAM_MAX_FRAME_AGE_LIVE_MS  = 1000.0
+
     if _state.camera_manager:
         frame, cam_fps, cam_latency_ms = _state.camera_manager.read_with_metadata()
+
+        # Check actual buffer age (independent of what read_with_metadata returns)
+        if frame is not None and active_source in ("video_file", "jetson_camera", "ip_camera", "phone_webcam"):
+            fb = _state.camera_manager.get_frame_buffer()
+            actual_age_ms = fb.frame_age_ms
+            max_age = (
+                STREAM_MAX_FRAME_AGE_VIDEO_MS if active_source == "video_file"
+                else STREAM_MAX_FRAME_AGE_LIVE_MS
+            )
+            if actual_age_ms > max_age:
+                # Frame is too old — show stale notice instead of freezing the stream
+                _show_camera_status_frame(
+                    "stale",
+                    f"Video stalled — frame is {actual_age_ms:.0f}ms old. Reconnecting…"
+                )
+                return
 
     if frame is None:
         # Camera is disconnected or connecting
         if _state.camera_manager:
             cam_stat = _state.camera_manager.get_status()
-            if cam_stat.get("status") in ("connecting", "reconnecting", "error", "disconnected", "waiting"):
+            if cam_stat.get("status") in ("connecting", "reconnecting", "error", "disconnected", "waiting", "stale"):
                 _show_camera_status_frame(cam_stat.get("status", ""), cam_stat.get("error"))
         return
 
@@ -829,13 +908,17 @@ def _show_camera_status_frame(status: str, error_msg: Optional[str] = None):
         msg = "WAITING FOR PHONE WEBCAM..."
         sub = "Scan the QR code or open /cam on your mobile phone."
         col = (60, 190, 240)
+    elif status == "stale":
+        msg = "VIDEO STALLED — AUTO-RECONNECTING..."
+        sub = error_msg or "Frame pipeline stalled. Reinitializing video source..."
+        col = (40, 140, 255)
     elif status == "error":
         msg = "CAMERA OFFLINE"
         sub = error_msg or "Unable to reach IP camera. Auto-retrying..."
         col = (80, 80, 240)
     else:
         msg = "CAMERA STANDBY"
-        sub = "Select a camera source to start live monitoring."
+        sub = "Select a camera source or press REPLAY VIDEO & FSM to start."
         col = (140, 150, 160)
 
     cv2.putText(blank, msg, (60, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.75, col, 2, cv2.LINE_AA)
@@ -971,6 +1054,29 @@ async def serve_cam_spa():
 async def control(body: dict):
     action = body.get("action", "")
     if action in ("start", "start_experiment"):
+        req_exp_id = body.get("experiment_id")
+        if req_exp_id:
+            if _state.state_manager:
+                _state.state_manager.experiment_id = req_exp_id
+                if hasattr(_state.state_manager, "fsm"):
+                    _state.state_manager.fsm.experiment_id = req_exp_id
+
+        # If EXP-VDATA or source == "video_file" requested, ensure video_file is loaded
+        req_source = body.get("source") or body.get("camera_source")
+        req_video_path = body.get("video_path") or body.get("path")
+        is_vdata = (bool(req_exp_id) and "vdata" in req_exp_id.lower()) or (req_source == "video_file") or bool(req_video_path)
+        if is_vdata and _state.camera_manager:
+            vpath = req_video_path or "vdata/20260905_145858.mp4"
+            loop = bool(body.get("loop", True))
+            _state.camera_manager.connect_video_file(vpath, loop=loop)
+            _state.mode = "video_file"
+            # Track for stale-frame auto-reconnect
+            _state.last_video_path = vpath
+            _state.last_video_loop = loop
+            _state._video_reconnect_attempts = 0
+            _state._video_last_reconnect_at = 0.0
+            _state.source_play_state = "STARTING"
+
         if _state.state_manager:
             _state.state_manager.reset()
         if _state.simulator:
@@ -982,19 +1088,20 @@ async def control(body: dict):
         if _state.feature_window:
             _state.feature_window.reset()
 
-        exp_id = _state.state_manager.experiment_id if _state.state_manager else f"EXP_{int(time.time())}"
+        exp_id = req_exp_id or (_state.state_manager.experiment_id if _state.state_manager else f"EXP_{int(time.time())}")
         cfg = _state.config
+        exp_name = "BLUE AND YELLOW BOX VDATA" if (bool(req_exp_id) and "vdata" in req_exp_id.lower()) else (cfg.experiment_name if cfg else "Experiment")
         if cfg:
             _state.experiment_logger = ExperimentLogger(
                 experiment_id=exp_id,
-                experiment_name=cfg.experiment_name,
+                experiment_name=exp_name,
                 output_dir=str(Path("experiments")),
                 total_steps=len(cfg.experiment_steps),
             )
         rec_path = ""
         if _state.recorder:
             rec_path = _state.recorder.start(experiment_id=exp_id)
-        return {"status": "started", "experiment_id": exp_id, "recording_path": rec_path}
+        return {"status": "started", "experiment_id": exp_id, "recording_path": rec_path, "source": _state.mode}
 
     if action in ("stop", "stop_experiment"):
         rec_path = ""
@@ -1119,12 +1226,27 @@ async def camera_connect(body: dict):
 
     elif source == "video_file":
         video_path = body.get("path") or body.get("url") or "vdata/20260905_145858.mp4"
-        loop = bool(body.get("loop", False))
+        loop = bool(body.get("loop", True))
         success, err = _state.camera_manager.connect_video_file(video_path, loop=loop)
         if not success:
             return JSONResponse(status_code=400, content={"status": "error", "error": err})
         _state.mode = "video_file"
-        return {"status": "connected", "source": "video_file", "path": video_path}
+        # Track for auto-reconnect
+        _state.last_video_path = video_path
+        _state.last_video_loop = loop
+        _state._video_reconnect_attempts = 0
+        _state._video_last_reconnect_at = 0.0
+        _state.source_play_state = "STARTING"
+        if body.get("reset_fsm", True):
+            if _state.state_manager:
+                _state.state_manager.reset()
+            if _state.hand_tracker:
+                _state.hand_tracker.reset()
+            if _state.interaction_tracker:
+                _state.interaction_tracker.reset()
+            if _state.feature_window:
+                _state.feature_window.reset()
+        return {"status": "connected", "source": "video_file", "path": video_path, "loop": loop}
 
     elif source == "sim":
         _state.camera_manager.set_simulation_mode()
@@ -1149,6 +1271,14 @@ async def camera_status():
         st = _state.camera_manager.get_status()
         st["stream_fps"] = round(_state.pipeline_fps, 1)
         st["ai_fps"] = round(_state.ai_fps, 1)
+        # Enrich with actual buffer frame_age (the true measure of staleness)
+        fb = _state.camera_manager.get_frame_buffer()
+        st["frame_age_ms"] = round(fb.frame_age_ms, 1)
+        st["frames_received"] = fb._frames_received
+        st["source_play_state"] = _state.source_play_state
+        st["dropped_stale_frames"] = _state._dropped_stale_frames
+        if _state.mode == "video_file":
+            st["video_path"] = _state.last_video_path
         return st
     return {
         "connected": False,
@@ -1158,6 +1288,10 @@ async def camera_status():
         "stream_fps": 0.0,
         "ai_fps": 0.0,
         "latency_ms": 0.0,
+        "frame_age_ms": 0.0,
+        "frames_received": 0,
+        "source_play_state": "IDLE",
+        "dropped_stale_frames": 0,
         "status": "disconnected",
         "error": None,
         "rotation": -1,
@@ -1200,13 +1334,18 @@ async def camera_diagnostics():
         "queue_depth": cam_diag.get("queue_depth", 0),
         "encode_latency_ms": stream_diag.get("encode_latency_ms", 0.0),
         "dropped_frames_pct": cam_diag.get("dropped_pct", 0.0),
-        "buffer_size": 1,
+        "dropped_stale_frames": _state._dropped_stale_frames,
+        "buffer_size": 1 if cam_diag.get("latest_frame_id", 0) > 0 else 0,
+        "latest_frame_id": cam_diag.get("latest_frame_id", 0),
+        "frames_received": cam_diag.get("frames_received", 0),
         "resolution": cam_diag.get("resolution", "1280x720"),
         "source": cam_diag.get("source", _state.mode),
+        "source_play_state": _state.source_play_state,
         "status": cam_diag.get("status", "connected"),
         "active_clients": stream_diag.get("active_clients", 0),
         "cpu_pct": cpu,
         "mem_pct": mem,
+        "video_path": _state.last_video_path if _state.mode == "video_file" else "",
     }
 
 
@@ -1261,6 +1400,28 @@ async def api_status():
     }
 
 
+# Voice Controls & Status
+@app.post("/api/voice/speak")
+async def api_voice_speak(body: dict):
+    text = body.get("text", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="Missing 'text' in request body")
+    if _state.tts:
+        _state.tts.speak(text)
+        return {"status": "ok", "spoken": text, "tts_status": _state.tts.get_status()}
+    return {"status": "error", "message": "TTS engine not initialized"}
+
+
+@app.get("/api/voice/status")
+async def api_voice_status():
+    if _state.tts:
+        return {
+            "status": "ONLINE" if _state.tts.is_available() else "OFFLINE",
+            "details": _state.tts.get_status(),
+        }
+    return {"status": "OFFLINE", "details": {}}
+
+
 # Logs & Experiments
 @app.get("/api/logs")
 async def api_logs():
@@ -1273,7 +1434,20 @@ async def api_logs():
 async def api_experiments():
     from core_ai.database.sqlite_db import OrbitaDB
     db = OrbitaDB()
-    return db.list_experiments()
+    exps = db.list_experiments()
+    vdata_exp = {
+        "id": "EXP-VDATA",
+        "name": "BLUE AND YELLOW BOX VDATA",
+        "description": "Autonomous step-by-step procedural validation of Yellow and Blue Box experiment from reference video telemetry in vdata/.",
+        "total_steps": 13,
+        "status": "READY",
+        "protocol": "13 STEPS",
+        "video_source": "vdata/20260905_145858.mp4",
+    }
+    existing_ids = {e.get("id") for e in exps}
+    if "EXP-VDATA" not in existing_ids:
+        return [vdata_exp] + exps
+    return exps
 
 
 # =========================================================================== #
@@ -1361,9 +1535,18 @@ async def api_dataset_status():
 
 @app.post("/api/experiment/start")
 async def api_experiment_start(body: dict):
-    """Explicit experiment start mechanism: resets FSM and arms automatic run recording."""
+    """Explicit experiment start mechanism: resets FSM and arms automatic run recording & logging."""
     experiment_id = body.get("experiment_id", "EXP001")
     scenario_id = body.get("scenario", "A").upper()
+    req_source = body.get("source") or body.get("camera_source")
+    req_video_path = body.get("video_path") or body.get("path")
+    is_vdata = ("vdata" in experiment_id.lower()) or (req_source == "video_file") or bool(req_video_path)
+
+    if is_vdata and _state.camera_manager:
+        vpath = req_video_path or "vdata/20260905_145858.mp4"
+        loop = bool(body.get("loop", True))
+        _state.camera_manager.connect_video_file(vpath, loop=loop)
+        _state.mode = "video_file"
 
     if _state.state_manager:
         _state.state_manager.reset()
@@ -1371,35 +1554,59 @@ async def api_experiment_start(body: dict):
         if hasattr(_state.state_manager, "fsm"):
             _state.state_manager.fsm.experiment_id = experiment_id
 
-    if _state.simulator:
+    if _state.simulator and not is_vdata:
         try:
             scenario = Scenario(scenario_id)
             _state.simulator.reset(scenario)
         except Exception:
             pass
 
+    cfg = _state.config
+    exp_name = "BLUE AND YELLOW BOX VDATA" if is_vdata else (cfg.experiment_name if cfg else "Experiment")
+    if cfg:
+        _state.experiment_logger = ExperimentLogger(
+            experiment_id=experiment_id,
+            experiment_name=exp_name,
+            output_dir=str(Path("experiments")),
+            total_steps=len(cfg.experiment_steps),
+        )
+
+    rec_path = ""
+    if _state.recorder:
+        rec_path = _state.recorder.start(experiment_id=experiment_id)
+
     run_id = ""
     if _state.run_collector:
         run_id = _state.run_collector.start_run(experiment_id)
 
-    logger.info("Experiment %s started (Scenario: %s, Candidate run: %s)", experiment_id, scenario_id, run_id)
+    logger.info("Experiment %s started (Scenario: %s, Video: %s, Candidate run: %s)", experiment_id, scenario_id, rec_path, run_id)
     return {
         "status": "experiment_started",
         "experiment_id": experiment_id,
         "run_id": run_id,
         "recording": True,
+        "recording_path": rec_path,
+        "source": _state.mode,
     }
 
 
 @app.post("/api/experiment/stop")
 async def api_experiment_stop():
-    """Stops active experiment and finalizes candidate run recording."""
+    """Stops active experiment, finalizes video recording, exports logs, and finalizes candidate run recording."""
+    rec_path = ""
+    if _state.recorder and _state.recorder.is_recording():
+        rec_path = _state.recorder.stop()
+
+    if _state.experiment_logger:
+        _state.experiment_logger.export()
+
     candidate_summary = None
     if _state.run_collector and _state.run_collector.is_active:
         candidate_summary = _state.run_collector.finalize_run(was_successful=True)
 
     return {
         "status": "experiment_stopped",
+        "recording_path": rec_path,
         "candidate": candidate_summary,
     }
 
@@ -1666,85 +1873,86 @@ async def api_vdata_videos():
     return videos
 
 
-@app.get("/api/vdata/stream/{filename}")
+@app.get("/api/vdata/stream/{filename:path}")
 async def api_vdata_stream(filename: str):
     """
     Streams a reference video from vdata/ with real-time YOLO object detection bounding boxes overlaid.
     Loops continuously so user can observe how YOLO detects objects throughout the trial.
     """
-    video_path = Path("vdata") / filename
+    clean_name = urllib.parse.unquote(filename)
+    video_path = Path("vdata") / clean_name
     if not video_path.exists():
-        return JSONResponse(status_code=404, content={"status": "error", "message": f"Video '{filename}' not found."})
+        video_path = Path("vdata") / filename
+    if not video_path.exists():
+        return JSONResponse(status_code=404, content={"status": "error", "message": f"Video '{clean_name}' not found."})
 
     async def generate():
-        while True:
-            cap = cv2.VideoCapture(str(video_path))
+        loop = asyncio.get_running_loop()
+        cap = cv2.VideoCapture(str(video_path))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        frame_delay = 1.0 / max(10.0, min(fps, 30.0))
+
+        def _get_next_frame():
+            nonlocal cap
             if not cap.isOpened():
-                break
-
-            fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-            frame_delay = 1.0 / max(10.0, min(fps, 30.0))
-
-            while True:
+                cap = cv2.VideoCapture(str(video_path))
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                # Loop back to beginning
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 ret, frame = cap.read()
-                if not ret:
-                    break
+                if not ret or frame is None:
+                    return None
 
-                # Resize for responsive real-time inference if 4K or very large
-                h, w = frame.shape[:2]
-                target_w = 960
-                if w > target_w:
-                    target_h = int(h * (target_w / w))
-                    frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            h, w = frame.shape[:2]
+            target_dim = 960
+            if max(h, w) > target_dim:
+                scale = target_dim / max(h, w)
+                frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
-                t_start = time.time()
-                detections = []
-                poses = []
-                left, right = None, None
-                interactions = []
-                try:
-                    if _state.pose:
-                        poses = _state.pose.estimate(frame, t_start)
-                    pose = poses[0] if poses else None
-                    person_bbox = pose.bbox if pose else None
-                    if _state.hand_tracker:
-                        left, right = _state.hand_tracker.track(pose, frame, t_start, person_bbox=person_bbox)
+            t_start = time.time()
+            detections = []
+            try:
+                with _inference_lock:
                     if _state.detector:
-                        detections = _state.detector.detect(frame, timestamp=t_start, hands=(left, right))
-                    if _state.interaction_tracker:
-                        interactions = _state.interaction_tracker.update(left, right, detections, t_start)
-                    frame = _annotate_frame(
-                        frame=frame,
-                        result=None,
-                        objects=detections,
-                        poses=poses,
-                        left_hand=left,
-                        right_hand=right,
-                        interactions=interactions,
-                        camera_name=f"VData: {filename}",
-                        latency_ms=(time.time() - t_start) * 1000.0,
-                    )
-                except Exception as e:
-                    logger.warning("Error running perception on frame: %s", e)
-                t_infer = (time.time() - t_start) * 1000.0
+                        detections = _state.detector.detect(frame, timestamp=t_start)
+                frame = _annotate_frame(
+                    frame=frame,
+                    result=None,
+                    objects=detections,
+                    camera_name=f"VData: {clean_name}",
+                    latency_ms=(time.time() - t_start) * 1000.0,
+                )
+            except Exception as e:
+                logger.warning("Error running perception on frame: %s", e)
 
-                # Header HUD overlay
-                cv2.rectangle(frame, (0, 0), (frame.shape[1], 36), (12, 17, 24), -1)
-                hud_text = f"YOLO INSPECT: {filename} | {len(detections)} OBJECTS DETECTED | {t_infer:.0f}ms"
-                cv2.putText(frame, hud_text, (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (60, 220, 120), 1, cv2.LINE_AA)
+            t_infer = (time.time() - t_start) * 1000.0
 
-                model_name = Path(_state.detector.active_model_path).name if _state.detector else "yolov8n.pt"
-                cv2.putText(frame, f"MODEL: {model_name}", (frame.shape[1] - 220, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 210, 220), 1, cv2.LINE_AA)
+            # Header HUD overlay
+            cv2.rectangle(frame, (0, 0), (frame.shape[1], 36), (12, 17, 24), -1)
+            hud_text = f"YOLO INSPECT: {clean_name} | {len(detections)} OBJECTS DETECTED | {t_infer:.0f}ms"
+            cv2.putText(frame, hud_text, (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (60, 220, 120), 1, cv2.LINE_AA)
 
-                _, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            model_name = Path(_state.detector.active_model_path).name if _state.detector else "yolov8n.pt"
+            cv2.putText(frame, f"MODEL: {model_name}", (max(10, frame.shape[1] - 220), 24), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 210, 220), 1, cv2.LINE_AA)
+
+            _, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+            return buf.tobytes()
+
+        try:
+            while True:
+                jpeg_bytes = await loop.run_in_executor(None, _get_next_frame)
+                if jpeg_bytes is None:
+                    await asyncio.sleep(0.1)
+                    continue
+
                 yield (
                     b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg_bytes + b"\r\n"
                 )
                 await asyncio.sleep(frame_delay)
-
+        finally:
             cap.release()
-            await asyncio.sleep(0.5)
 
     return StreamingResponse(
         generate(),
@@ -1762,9 +1970,12 @@ async def api_vdata_inspect_frame(body: dict):
 
     filename = body.get("filename", "")
     frame_idx = int(body.get("frame_idx", 0))
-    video_path = Path("vdata") / filename
+    clean_name = urllib.parse.unquote(filename)
+    video_path = Path("vdata") / clean_name
     if not video_path.exists():
-        return JSONResponse(status_code=404, content={"status": "error", "message": f"Video '{filename}' not found."})
+        video_path = Path("vdata") / filename
+    if not video_path.exists():
+        return JSONResponse(status_code=404, content={"status": "error", "message": f"Video '{clean_name}' not found."})
 
     cap = cv2.VideoCapture(str(video_path))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
@@ -1777,18 +1988,19 @@ async def api_vdata_inspect_frame(body: dict):
         return JSONResponse(status_code=400, content={"status": "error", "message": f"Could not read frame {frame_idx}"})
 
     h, w = frame.shape[:2]
-    target_w = 960
-    if w > target_w:
-        target_h = int(h * (target_w / w))
-        frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+    target_dim = 960
+    if max(h, w) > target_dim:
+        scale = target_dim / max(h, w)
+        frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
     t0 = time.time()
-    poses = _state.pose.estimate(frame, t0) if _state.pose else []
-    pose = poses[0] if poses else None
-    person_bbox = pose.bbox if pose else None
-    left, right = _state.hand_tracker.track(pose, frame, t0, person_bbox=person_bbox) if _state.hand_tracker else (None, None)
-    detections = _state.detector.detect(frame, timestamp=t0, hands=(left, right)) if _state.detector else []
-    interactions = _state.interaction_tracker.update(left, right, detections, t0) if _state.interaction_tracker else []
+    with _inference_lock:
+        poses = _state.pose.estimate(frame, t0) if _state.pose else []
+        pose = poses[0] if poses else None
+        person_bbox = pose.bbox if pose else None
+        left, right = _state.hand_tracker.track(pose, frame, t0, person_bbox=person_bbox) if _state.hand_tracker else (None, None)
+        detections = _state.detector.detect(frame, timestamp=t0, hands=(left, right), frame_id=frame_idx) if _state.detector else []
+        interactions = _state.interaction_tracker.update(left, right, detections, t0) if _state.interaction_tracker else []
     latency_ms = round((time.time() - t0) * 1000.0, 1)
 
     annotated = _annotate_frame(
@@ -1799,7 +2011,7 @@ async def api_vdata_inspect_frame(body: dict):
         left_hand=left,
         right_hand=right,
         interactions=interactions,
-        camera_name=f"Inspect: {filename}",
+        camera_name=f"Inspect: {clean_name}",
         latency_ms=latency_ms,
     )
     _, buf = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 88])

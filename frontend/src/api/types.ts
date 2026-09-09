@@ -8,6 +8,34 @@ export interface ExperimentStep {
   expected_target?: string;
 }
 
+export interface ChecklistItem {
+  criterion: string;
+  satisfied: boolean;
+  detail?: string;
+}
+
+export interface InteractionFeatures {
+  hand_object_distance?: number;
+  hand_object_overlap?: number;
+  object_displacement?: number;
+  max_displacement?: number;
+  object_velocity?: number;
+  hand_velocity?: number;
+  relative_motion?: number;
+  contact_frames?: number;
+  is_pointing?: boolean;
+  is_holding?: boolean;
+}
+
+export interface ConfidenceScores {
+  object_confidence: number;
+  hand_confidence: number;
+  tracking_confidence: number;
+  interaction_confidence: number;
+  action_confidence: number;
+  step_confidence: number;
+}
+
 export interface DebugTelemetry {
   source: string;
   frame: number;
@@ -21,6 +49,12 @@ export interface DebugTelemetry {
   fsm_step_number: number;
   voice_prompt: string;
   voice_status: string;
+  validation_state?: string;
+  validation_reason?: string;
+  why_completed_checklist?: ChecklistItem[];
+  interaction_features?: InteractionFeatures;
+  confidence_scores?: ConfidenceScores;
+  step_confidence?: number;
 }
 
 export interface ConfirmedActionInfo {
@@ -31,6 +65,10 @@ export interface ConfirmedActionInfo {
   confidence: number;
   validation_state?: string;
   validation_reason?: string;
+  why_completed_checklist?: ChecklistItem[];
+  interaction_features?: InteractionFeatures;
+  confidence_scores?: ConfidenceScores;
+  validation_debug?: any;
 }
 
 export interface FSMState {
@@ -70,5 +108,10 @@ export interface ValidationResult extends FSMState {
   confirmed_action?: ConfirmedActionInfo;
   validation_state?: string;
   validation_reason?: string;
+  why_completed_checklist?: ChecklistItem[];
+  interaction_features?: InteractionFeatures;
+  confidence_scores?: ConfidenceScores;
+  step_confidence?: number;
   debug_telemetry?: DebugTelemetry;
+  validation_debug?: any;
 }

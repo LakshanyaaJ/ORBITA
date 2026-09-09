@@ -164,7 +164,16 @@ class Camera:
             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
         fh, fw = frame.shape[:2]
-        if self.width > 0 and self.height > 0 and (fw != self.width or fh != self.height):
+        is_vid = (
+            (isinstance(self.source, str) and any(self.source.lower().endswith(ext) for ext in (".mp4", ".avi", ".mov", ".mkv")))
+            or ("vdata" in str(self.source).lower())
+        )
+        if is_vid:
+            target_w = 960
+            if fw > target_w:
+                target_h = int(fh * (target_w / fw))
+                frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+        elif self.width > 0 and self.height > 0 and (fw != self.width or fh != self.height):
             frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_LINEAR)
         return frame
 
@@ -192,9 +201,10 @@ class Camera:
                 return None
 
         self._frame_index += 1
+        t_push = time.monotonic()
         frame = self._preprocess_frame(frame)
-        self._frame_buffer.push(frame, t0)
-        self._latency_ms = 0.0
+        self._frame_buffer.push(frame, t_push)
+        self._latency_ms = 0.0  # sequential: frame is fresh by definition
         return frame
 
     def read(self) -> Optional[np.ndarray]:
@@ -271,6 +281,7 @@ class Camera:
                     if getattr(self, "loop_video", False):
                         self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         self._frame_index = 0
+                        time.sleep(0.01)  # prevent tight busy-spin at EOF on seek
                         continue
                     else:
                         self._is_eof = True

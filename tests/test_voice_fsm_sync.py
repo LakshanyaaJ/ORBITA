@@ -57,8 +57,9 @@ def test_full_13_step_sequence_with_voice_synchronization(official_config):
         source="yolo",
         semantic_identity="BLUE_BOX",
     )
+    pred_identify = ActionPrediction(action="IDENTIFY", confidence=0.92, next_action="IDLE", next_confidence=0.2, is_uncertain=False, target_object="BLUE_BOX")
     for _ in range(3):
-        res = manager.process(pred_idle, detected_objects=[blue_det])
+        res = manager.process(pred_identify, detected_objects=[blue_det])
     
     # Step 1 confirmed -> Advanced to Step 2 -> Voice Step 2
     assert res.fsm_state.current_step_idx == 1
@@ -121,8 +122,9 @@ def test_full_13_step_sequence_with_voice_synchronization(official_config):
         source="yolo",
         semantic_identity="YELLOW_BOX",
     )
+    pred_identify_y = ActionPrediction(action="IDENTIFY", confidence=0.92, next_action="IDLE", next_confidence=0.2, is_uncertain=False, target_object="YELLOW_BOX")
     for _ in range(3):
-        res = manager.process(pred_idle, detected_objects=[yellow_det])
+        res = manager.process(pred_identify_y, detected_objects=[yellow_det])
 
     assert res.fsm_state.current_step_idx == 4
     assert len(spoken_messages) == 5

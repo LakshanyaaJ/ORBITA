@@ -11,7 +11,10 @@ export default function PageShell() {
   const isLive = location.pathname.includes('/live');
 
   return (
-    <div className="min-h-screen bg-space-900 text-space-100 flex flex-col font-sans">
+    <div className={clsx(
+      "bg-space-900 text-space-100 flex flex-col font-sans",
+      isLive ? "h-screen overflow-hidden" : "min-h-screen"
+    )}>
       {/* Top Navigation Bar - Clean Mission Control Light Aerospace Style */}
       <header className="h-16 border-b border-space-600 flex items-center justify-between px-6 shrink-0 bg-space-800 shadow-[0_1px_2px_rgba(0,0,0,0.03)] z-30">
         <div className="flex items-center gap-6">
@@ -105,7 +108,7 @@ export default function PageShell() {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto relative bg-space-900">
+      <main className={clsx("flex-1 relative bg-space-900 min-h-0", isLive ? "overflow-hidden" : "overflow-y-auto")}>
         <Outlet />
       </main>
     </div>

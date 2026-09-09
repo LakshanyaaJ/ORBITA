@@ -4,16 +4,24 @@
 
 export interface CameraStatus {
   connected: boolean;
-  source: 'sim' | 'jetson_camera' | 'ip_camera' | 'phone_webcam' | 'disconnected';
+  source: 'sim' | 'jetson_camera' | 'ip_camera' | 'phone_webcam' | 'video_file' | 'disconnected';
   url?: string;
   device_index?: number;
   fps: number;
   stream_fps?: number;
   ai_fps?: number;
   latency_ms: number;
-  status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' | 'waiting' | 'error';
+  frame_age_ms?: number;
+  frames_received?: number;
+  source_play_state?: 'IDLE' | 'STARTING' | 'PLAYING' | 'STALE' | 'ERROR';
+  dropped_stale_frames?: number;
+  video_path?: string;
+  status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected' | 'waiting' | 'error' | 'stale';
   error?: string | null;
   rotation?: number;
+  frame_index?: number;
+  total_frames?: number;
+  is_eof?: boolean;
 }
 
 export interface CameraDiagnostics {
@@ -22,15 +30,21 @@ export interface CameraDiagnostics {
   ai_fps: number;
   pipeline_latency_ms: number;
   camera_latency_ms: number;
+  frame_age_ms: number;
   encode_latency_ms: number;
   dropped_frames_pct: number;
+  dropped_stale_frames?: number;
   buffer_size: number;
+  latest_frame_id?: number;
+  frames_received?: number;
   resolution: string;
   source: string;
+  source_play_state?: string;
   status: string;
   active_clients: number;
   cpu_pct: number;
   mem_pct: number;
+  video_path?: string;
 }
 
 export interface AvailableNetworkInterface {
@@ -57,13 +71,15 @@ export interface PhonePairingInfo {
 }
 
 export interface ConnectCameraParams {
-  source: 'jetson_camera' | 'ip_camera' | 'phone_webcam' | 'sim';
+  source: 'jetson_camera' | 'ip_camera' | 'phone_webcam' | 'sim' | 'video_file';
   url?: string;
   ip?: string;
   port?: number | string;
   path?: string;
   device_index?: number;
   timeout_sec?: number;
+  loop?: boolean;
+  reset_fsm?: boolean;
 }
 
 export const BACKEND_BASE =

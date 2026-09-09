@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -37,6 +38,7 @@ class VideoRecorder:
         self.output_dir = Path(config.output_dir)
         fourcc_str = getattr(config, "fourcc", "mp4v")
         self.fourcc = cv2.VideoWriter_fourcc(*fourcc_str)
+        self._lock = threading.Lock()
         self._writer: Optional[cv2.VideoWriter] = None
         self._experiment_id: str = ""
         self._frame_count: int = 0
@@ -146,58 +148,66 @@ class VideoRecorder:
         if not self._is_started or frame is None:
             return
 
-        h, w = frame.shape[:2]
-
-        # Lazy initialization on first frame if dimensions weren't predefined
-        if self._writer is None and not self._has_error:
-            self._width = w
-            self._height = h
-            if not self._init_writer():
-                self._dropped_frames += 1
+        with self._lock:
+            if not self._is_started:
                 return
 
-        if self._writer is not None and self._writer.isOpened():
-            try:
-                # Frame integrity: resize safely if camera stream changes resolution
-                if w != self._width or h != self._height:
-                    frame_to_write = cv2.resize(frame, (self._width, self._height))
-                else:
-                    frame_to_write = frame
+            h, w = frame.shape[:2]
 
-                self._writer.write(frame_to_write)
-                self._frame_count += 1
-            except Exception as exc:
-                logger.error("Failed to write video frame: %s", exc)
+            # Lazy initialization on first frame if dimensions weren't predefined
+            if self._writer is None and not self._has_error:
+                self._width = w
+                self._height = h
+                if not self._init_writer():
+                    self._dropped_frames += 1
+                    return
+
+            if self._writer is not None and self._writer.isOpened():
+                try:
+                    # Frame integrity: resize safely if camera stream changes resolution
+                    if w != self._width or h != self._height:
+                        frame_to_write = cv2.resize(frame, (self._width, self._height))
+                    else:
+                        frame_to_write = frame
+
+                    self._writer.write(frame_to_write)
+                    self._frame_count += 1
+                except Exception as exc:
+                    logger.error("Failed to write video frame: %s", exc)
+                    self._dropped_frames += 1
+            else:
                 self._dropped_frames += 1
-        else:
-            self._dropped_frames += 1
 
     def stop(self) -> str:
         """Finalize and release recording, creating canonical experiment.mp4 copy."""
-        if self._start_time:
-            self._duration = time.time() - self._start_time
+        with self._lock:
+            if self._start_time:
+                self._duration = time.time() - self._start_time
 
-        if self._writer is not None:
-            self._writer.release()
-            self._writer = None
-            logger.info(
-                "Recording finalized: %s (%d frames, duration=%.1fs, dropped=%d)",
-                self._filepath,
-                self._frame_count,
-                self._duration,
-                self._dropped_frames,
-            )
-
-            # Ensure canonical experiment.mp4 exists in experiment directory
-            if self._filepath and os.path.exists(self._filepath) and self._frame_count > 0:
+            if self._writer is not None:
                 try:
-                    shutil.copyfile(self._filepath, self._canonical_filepath)
-                    logger.info("Canonical experiment.mp4 created: %s", self._canonical_filepath)
+                    self._writer.release()
                 except Exception as exc:
-                    logger.warning("Could not copy canonical experiment.mp4: %s", exc)
+                    logger.warning("Error releasing VideoWriter: %s", exc)
+                self._writer = None
+                logger.info(
+                    "Recording finalized: %s (%d frames, duration=%.1fs, dropped=%d)",
+                    self._filepath,
+                    self._frame_count,
+                    self._duration,
+                    self._dropped_frames,
+                )
 
-        self._is_started = False
-        return self._filepath
+                # Ensure canonical experiment.mp4 exists in experiment directory
+                if self._filepath and os.path.exists(self._filepath) and self._frame_count > 0:
+                    try:
+                        shutil.copyfile(self._filepath, self._canonical_filepath)
+                        logger.info("Canonical experiment.mp4 created: %s", self._canonical_filepath)
+                    except Exception as exc:
+                        logger.warning("Could not copy canonical experiment.mp4: %s", exc)
+
+            self._is_started = False
+            return self._filepath
 
     def is_recording(self) -> bool:
         return self._is_started and not self._has_error

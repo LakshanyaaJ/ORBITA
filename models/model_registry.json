@@ -1185,5 +1185,24 @@
       "recall": 0.7444
     },
     "promotion_notes": "Promoted: mAP50 improved from 0.1411 to 0.7636 (+0.6225)"
+  },
+  "active_yolo_model": "models/orbita_yolo_detector_v4.pt",
+  "yolo_candidates": {
+    "v4_7class": {
+      "path": "models/orbita_yolo_detector_v4.pt",
+      "classes": [
+        "LOCATION_A",
+        "LOCATION_B",
+        "PEN",
+        "WATCH",
+        "BLUE_BOX",
+        "YELLOW_BOX",
+        "HAND"
+      ],
+      "mAP50": 0.8651808441223015,
+      "precision": 0.8677537661810824,
+      "recall": 0.7701252103103383,
+      "timestamp": 1788948280.1624055
+    }
   }
 }

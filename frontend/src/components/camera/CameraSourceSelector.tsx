@@ -1,7 +1,7 @@
-import { Smartphone, Video, Sparkles, QrCode } from 'lucide-react';
+import { Smartphone, Video, Sparkles, QrCode, Film } from 'lucide-react';
 import clsx from 'clsx';
 
-export type CameraSourceType = 'phone_webcam' | 'jetson_camera' | 'ip_camera' | 'sim';
+export type CameraSourceType = 'phone_webcam' | 'jetson_camera' | 'ip_camera' | 'sim' | 'video_file';
 
 interface CameraSourceSelectorProps {
   selectedSource: CameraSourceType;
@@ -15,6 +15,7 @@ export default function CameraSourceSelector({
   disabled = false,
 }: CameraSourceSelectorProps) {
   const options: { id: CameraSourceType; label: string; icon: any }[] = [
+    { id: 'video_file', label: 'VData Video', icon: Film },
     { id: 'phone_webcam', label: 'Phone Web Cam', icon: QrCode },
     { id: 'jetson_camera', label: 'Jetson Cam', icon: Video },
     { id: 'ip_camera', label: 'IP Camera App', icon: Smartphone },
@@ -26,7 +27,7 @@ export default function CameraSourceSelector({
       <div className="text-[11px] font-mono font-bold tracking-widest text-space-400 uppercase">
         Camera Input Source
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-space-900 rounded border border-space-600">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1 bg-space-900 rounded border border-space-600">
         {options.map((opt) => {
           const Icon = opt.icon;
           const isSelected = selectedSource === opt.id;
