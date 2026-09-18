@@ -1,14 +1,56 @@
+import { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
-import { Activity, Cpu, Settings, ArrowLeft, Radio, Film } from 'lucide-react';
+import { Activity, Cpu, Settings, ArrowLeft, Radio, Film, Play, Wifi, WifiOff } from 'lucide-react';
 import clsx from 'clsx';
 
 import GoogleAppsButton from './GoogleAppsButton';
+import OrbitaDemoModal from '../demo/OrbitaDemoModal';
+import StructuredResultModal from '../results/StructuredResultModal';
+import { BACKEND_BASE } from '../../api/camera';
 
 export default function PageShell() {
   const navigate = useNavigate();
   const location = useLocation();
 
   const isLive = location.pathname.includes('/live');
+
+  const [isGroundOnline, setIsGroundOnline] = useState<boolean>(true);
+  const [pendingSync, setPendingSync] = useState<number>(0);
+  const [isDemoModalOpen, setIsDemoModalOpen] = useState<boolean>(false);
+  const [isResultModalOpen, setIsResultModalOpen] = useState<boolean>(false);
+
+  // Poll sync and ground link status
+  useEffect(() => {
+    const fetchSync = async () => {
+      try {
+        const res = await fetch(`${BACKEND_BASE}/api/sync/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setIsGroundOnline(data.ground_link_online ?? true);
+          setPendingSync(data.pending_count ?? 0);
+        }
+      } catch (err) {
+        // Backend offline or unreachable
+      }
+    };
+    fetchSync();
+    const interval = setInterval(fetchSync, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const toggleGroundLink = async () => {
+    const nextState = !isGroundOnline;
+    setIsGroundOnline(nextState);
+    try {
+      await fetch(`${BACKEND_BASE}/api/sync/ground_link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ online: nextState }),
+      });
+    } catch (err) {
+      console.warn("Failed to toggle ground link:", err);
+    }
+  };
 
   return (
     <div className={clsx(
@@ -77,7 +119,7 @@ export default function PageShell() {
                   navigate('/mission');
                 }
               }}
-              className="flex items-center gap-2 text-space-400 hover:text-status-critical transition-colors uppercase font-bold text-xs tracking-wider ml-4 px-3 py-1.5 rounded-md hover:bg-red-50"
+              className="flex items-center gap-2 text-space-400 hover:text-status-critical transition-colors uppercase font-bold text-xs tracking-wider ml-4 px-3 py-1.5 rounded-md hover:bg-red-50 cursor-pointer"
             >
               <ArrowLeft size={16} />
               EXIT EXPERIMENT
@@ -85,22 +127,54 @@ export default function PageShell() {
           )}
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* RUN ORBITA DEMO Trigger Button */}
+          <button
+            type="button"
+            onClick={() => setIsDemoModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent-cyan hover:bg-accent-cyan/80 text-space-950 text-xs font-mono font-bold tracking-wider shadow-sm transition-all cursor-pointer"
+            title="Launch 18-step deterministic ORBITA demo"
+          >
+            <Play size={13} />
+            <span>RUN ORBITA DEMO</span>
+          </button>
+
+          {/* Ground Link Status & Simulation Toggle */}
+          <button
+            type="button"
+            onClick={toggleGroundLink}
+            className={clsx(
+              "flex items-center gap-2 px-2.5 py-1 rounded-md text-xs font-mono font-bold border transition-colors cursor-pointer",
+              isGroundOnline 
+                ? "bg-emerald-950/60 border-emerald-700/80 text-emerald-300 hover:bg-emerald-900/60" 
+                : "bg-red-950/70 border-red-700/80 text-red-300 hover:bg-red-900/70"
+            )}
+            title="Click to toggle Ground Link online/offline simulation"
+          >
+            {isGroundOnline ? <Wifi size={14} className="text-emerald-400" /> : <WifiOff size={14} className="text-red-400 animate-pulse" />}
+            <span>GROUND: {isGroundOnline ? "ONLINE" : "OFFLINE"}</span>
+            {pendingSync > 0 && (
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                {pendingSync} PENDING
+              </span>
+            )}
+          </button>
+
           {/* Status Indicators */}
-          <div className="flex items-center gap-3 text-xs font-mono font-semibold tracking-wider">
+          <div className="flex items-center gap-2 text-xs font-mono font-semibold tracking-wider">
             <StatusIndicator label="AI" active={true} color="bg-status-success" />
             <StatusIndicator label="REC" active={isLive} color={isLive ? "bg-status-warning animate-pulse" : "bg-space-400"} />
             <StatusIndicator label="STREAM" active={true} color="bg-status-success" />
           </div>
 
-          <div className="w-px h-5 bg-space-600 mx-1"></div>
+          <div className="w-px h-5 bg-space-600 mx-0.5"></div>
           
           {/* Clock */}
-          <div className="font-mono text-space-400 text-xs bg-space-700 px-2.5 py-1 rounded border border-space-600">
+          <div className="font-mono text-space-400 text-xs bg-space-700 px-2 py-1 rounded border border-space-600">
             {new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })} UTC
           </div>
 
-          <div className="w-px h-5 bg-space-600 mx-1"></div>
+          <div className="w-px h-5 bg-space-600 mx-0.5"></div>
 
           {/* Google Apps Icon Launcher */}
           <GoogleAppsButton />
@@ -111,6 +185,17 @@ export default function PageShell() {
       <main className={clsx("flex-1 relative bg-space-900 min-h-0", isLive ? "overflow-hidden" : "overflow-y-auto")}>
         <Outlet />
       </main>
+
+      {/* Global Modals */}
+      <OrbitaDemoModal
+        isOpen={isDemoModalOpen}
+        onClose={() => setIsDemoModalOpen(false)}
+        onViewResults={() => setIsResultModalOpen(true)}
+      />
+      <StructuredResultModal
+        isOpen={isResultModalOpen}
+        onClose={() => setIsResultModalOpen(false)}
+      />
     </div>
   );
 }

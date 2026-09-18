@@ -60,23 +60,23 @@ def normalize_action(action: str) -> str:
         return "IDENTIFY_WATCH"
     if act in ("PICKUP_BLUE_BOX", "PICK_UP_BLUE_BOX", "PICK UP THE BLUE BOX"):
         return "PICK_UP_BLUE_BOX"
-    if act in ("PLACE_BLUE_BOX_A", "PLACE_BLUE_BOX_AT_LOCATION_A", "PLACE THE BLUE BOX AT LOCATION A", "PLACE_BLUE_BOX"):
+    if act in ("PLACE_BLUE_BOX_A", "PLACE_BLUE_BOX_LOCATION_A", "PLACE_BLUE_BOX_AT_LOCATION_A", "PLACE THE BLUE BOX AT LOCATION A", "PLACE_BLUE_BOX"):
         return "PLACE_BLUE_BOX_A"
     if act in ("PICKUP_YELLOW_BOX", "PICK_UP_YELLOW_BOX", "PICK UP THE YELLOW BOX"):
         return "PICK_UP_YELLOW_BOX"
-    if act in ("PLACE_YELLOW_BOX_B", "PLACE_YELLOW_BOX_AT_LOCATION_B", "PLACE THE YELLOW BOX AT LOCATION B", "PLACE_YELLOW_BOX"):
+    if act in ("PLACE_YELLOW_BOX_B", "PLACE_YELLOW_BOX_LOCATION_B", "PLACE_YELLOW_BOX_AT_LOCATION_B", "PLACE THE YELLOW BOX AT LOCATION B", "PLACE_YELLOW_BOX"):
         return "PLACE_YELLOW_BOX_B"
     if act in ("PICKUP_PEN", "PICK_UP_PEN", "PICK UP THE PEN"):
         return "PICK_UP_PEN"
-    if act in ("PLACE_PEN_IN_BLUE_BOX", "PLACE_PEN_IN_YELLOW_BOX", "PLACE PEN IN BLUE BOX", "PLACE PEN IN YELLOW BOX"):
+    if act in ("PLACE_PEN_BLUE_BOX", "PLACE_PEN_IN_BLUE_BOX", "PLACE_PEN_YELLOW_BOX", "PLACE_PEN_IN_YELLOW_BOX", "PLACE PEN IN BLUE BOX", "PLACE PEN IN YELLOW BOX", "PLACE PEN BLUE BOX"):
         return "PLACE_PEN_IN_YELLOW_BOX" if "YELLOW" in act else "PLACE_PEN_IN_BLUE_BOX"
     if act in ("PICKUP_WATCH", "PICK_UP_WATCH", "PICK UP THE WATCH"):
         return "PICK_UP_WATCH"
-    if act in ("PLACE_WATCH_IN_YELLOW_BOX", "PLACE WATCH IN YELLOW BOX"):
+    if act in ("PLACE_WATCH_YELLOW_BOX", "PLACE_WATCH_IN_YELLOW_BOX", "PLACE WATCH IN YELLOW BOX", "PLACE WATCH YELLOW BOX"):
         return "PLACE_WATCH_IN_YELLOW_BOX"
-    if act in ("MOVE_BLUE_BOX", "MOVE_BLUE_BOX_FROM_LOCATION_A_TO_LOCATION_B", "MOVE BLUE BOX FROM LOCATION A TO LOCATION B"):
+    if act in ("MOVE_BLUE_BOX", "MOVE_BLUE_BOX_A_TO_B", "MOVE_BLUE_BOX_FROM_A_TO_B", "MOVE_BLUE_BOX_LOCATION_A_TO_LOCATION_B", "MOVE_BLUE_BOX_FROM_LOCATION_A_TO_LOCATION_B", "MOVE BLUE BOX FROM LOCATION A TO LOCATION B"):
         return "MOVE_BLUE_BOX"
-    if act in ("MOVE_YELLOW_BOX", "MOVE_YELLOW_BOX_FROM_LOCATION_B_TO_LOCATION_A", "MOVE YELLOW BOX FROM LOCATION B TO LOCATION A"):
+    if act in ("MOVE_YELLOW_BOX", "MOVE_YELLOW_BOX_B_TO_A", "MOVE_YELLOW_BOX_FROM_B_TO_A", "MOVE_YELLOW_BOX_LOCATION_B_TO_LOCATION_A", "MOVE_YELLOW_BOX_FROM_LOCATION_B_TO_LOCATION_A", "MOVE YELLOW BOX FROM LOCATION B TO LOCATION A"):
         return "MOVE_YELLOW_BOX"
     if act in ("COMPLETE", "COMPLETED", "EXPERIMENT_COMPLETE"):
         return "COMPLETE"
@@ -98,12 +98,10 @@ def normalize_target(target: str) -> str:
     if not target:
         return ""
     tgt = str(target).strip().upper()
-    if tgt in ("BLUE_BOX", "BLUE"):
+    if tgt in ("BLUE_BOX", "BLUE", "MAIN_BOX", "MAIN", "BLUE_BOX_CONTAINER"):
         return "BLUE_BOX"
     if tgt in ("RED_BOX", "RED"):
         return "RED_BOX"
-    if tgt in ("MAIN_BOX", "MAIN"):
-        return "MAIN_BOX"
     if tgt in ("YELLOW_BOX", "YELLOW"):
         return "YELLOW_BOX"
     if tgt in ("PEN", "TOOL", "PENCIL", "STYLUS"):
@@ -1094,6 +1092,38 @@ class ActionConfirmationGate:
             detected_objects=list(obj_map.values()),
         )
 
+        has_identify_act = (
+            normalize_action(har_action) in ("IDENTIFY", "INSPECT", "POINT", "OBSERVE")
+            or any(bool(getattr(i, "is_pointing", False)) for i in interactions)
+        )
+
+        # Requirement 1 & 4: Detection alone without identification action/pointing must NOT advance step
+        if not has_identify_act:
+            self._consecutive_confirmed[target_canonical] = 0
+            self._current_gate_status = ActionGateStatus.WAITING
+            step_contract["temporalConfirmation"] = f"0 / {req_frames}"
+            step_contract["status"] = "WAITING"
+            step_contract["valid"] = False
+
+            val_state = "OBJECT_DETECTED"
+            if interactions and any(getattr(i, "state", 0) in (2, 3) or getattr(i, "hand_object_overlap", 0.0) > 0.1 for i in interactions):
+                val_state = "HAND_NEAR_OBJECT"
+
+            return ConfirmedAction(
+                action=action_name,
+                object_name=target_canonical,
+                status=ActionGateStatus.WAITING,
+                confidence=max_conf,
+                timestamp=now,
+                validation_state=val_state,
+                validation_reason=f"{target_canonical} detected on workstation. Awaiting identification action or gesture.",
+                object_confidence=max_conf,
+                hand_confidence=hand_c,
+                step_confidence=0.3,
+                interaction_features=features,
+                validation_debug=step_contract,
+            )
+
         # Temporal confirmation handling
         if not object_valid:
             # Reset counter when condition disappears
@@ -1118,7 +1148,7 @@ class ActionConfirmationGate:
                 validation_debug=step_contract,
             )
 
-        # Object is valid: accumulate consecutive frames
+        # Object is valid & action present: accumulate consecutive frames
         self._consecutive_confirmed[target_canonical] = self._consecutive_confirmed.get(target_canonical, 0) + 1
         conf_frames = self._consecutive_confirmed[target_canonical]
         is_confirmed = conf_frames >= req_frames
@@ -1131,6 +1161,7 @@ class ActionConfirmationGate:
             {"criterion": f"{target_canonical} detected reliably", "satisfied": True, "detail": f"conf {max_conf:.2f}"},
             {"criterion": f"Temporal stability ({req_frames} consecutive frames)", "satisfied": is_confirmed, "detail": f"{min(conf_frames, req_frames)} / {req_frames} frames"},
             {"criterion": "Precondition satisfied", "satisfied": True, "detail": "target in workspace"},
+            {"criterion": "Identification action or gesture verified", "satisfied": has_identify_act, "detail": "action/pointing confirmed"},
         ]
 
         if is_confirmed:
@@ -1172,7 +1203,7 @@ class ActionConfirmationGate:
             confidence=max_conf,
             timestamp=now,
             track_id=getattr(target_det, "track_id", None),
-            validation_state="CONFIRMING",
+            validation_state="ACTION_IN_PROGRESS",
             validation_reason=f"Confirming {action_name}: {target_canonical} stable for {conf_frames}/{req_frames} frames (conf {max_conf:.2f})",
             object_confidence=max_conf,
             hand_confidence=hand_c,
@@ -1401,6 +1432,12 @@ class ActionConfirmationGate:
         """
         obj_c, hand_c, trk_c, int_c, act_c = confidences
         req_frames = spec.temporal_confirmation_frames
+        is_already_placed_track = any(
+            str(getattr(getattr(t, "state", ""), "value", str(getattr(t, "state", "")))).upper() in ("PLACED", "STATIONARY")
+            for t in (tracks or [])
+        )
+        if is_already_placed_track:
+            req_frames = min(2, req_frames)
         was_held = self._was_held.get(exp_obj, False)
         is_holding = features.get("is_holding", False)
         obj_speed = features.get("object_velocity", 0.0)
@@ -1419,14 +1456,14 @@ class ActionConfirmationGate:
                     ax, ay, aw, ah = loc_a.bbox
                     in_target = (ax - 25 <= cx <= ax + aw + 25 and ay - 25 <= cy <= ay + ah + 25)
                 else:
-                    in_target = (cy > frame_width * 0.50)
+                    in_target = (cx < frame_width * 0.50)
             elif "LOCATION_B" in exp_target:
                 loc_b = obj_map.get("LOCATION_B")
                 if loc_b is not None:
                     bx, by, bw, bh = loc_b.bbox
                     in_target = (bx - 25 <= cx <= bx + bw + 25 and by - 25 <= cy <= by + bh + 25)
                 else:
-                    in_target = (cy < frame_width * 0.50)
+                    in_target = (cx >= frame_width * 0.50)
             elif "BLUE_BOX" in exp_target or "BLUE" in exp_target:
                 blue = obj_map.get("BLUE_BOX")
                 if blue is not None:
@@ -1586,14 +1623,14 @@ class ActionConfirmationGate:
                     bx, by, bw, bh = loc_b.bbox
                     reached = (bx - 25 <= cx <= bx + bw + 25 and by - 25 <= cy <= by + bh + 25)
                 else:
-                    reached = (cy < frame_width * 0.50)
+                    reached = (cx >= frame_width * 0.50)
             elif to_loc == "LOCATION_A" or "TO_A" in spec.instruction or "LOCATION_A" in spec.instruction:
                 loc_a = obj_map.get("LOCATION_A")
                 if loc_a is not None:
                     ax, ay, aw, ah = loc_a.bbox
                     reached = (ax - 25 <= cx <= ax + aw + 25 and ay - 25 <= cy <= ay + ah + 25)
                 else:
-                    reached = (cy > frame_width * 0.50)
+                    reached = (cx < frame_width * 0.50)
             else:
                 reached = True
         else:

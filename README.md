@@ -1,132 +1,122 @@
-# ORBITA
+# ORBITA — Edge-First Autonomous Experiment Intelligence Platform
 
-**Offline AI Human Activity Recognition (HAR) & Autonomous Experiment Copilot**  
-*Optimized for Edge Deployment on NVIDIA Jetson Orin Nano*
+**Offline AI Human Activity Recognition (HAR), 3D Human Mesh Recovery (HMR) & Procedural Experiment Intelligence**  
+*Target Platform: NVIDIA Jetson Orin Nano / Local Workstation*
 
 ---
 
-## Architecture Overview
+## 1. Overview
 
-ORBITA is an edge-first AI system designed to monitor, guide, and validate manual procedures performed by astronauts and researchers during scientific spaceflight experiments.
+**ORBITA** is an offline-capable experiment copilot platform designed for extreme environments (spaceflight, analog habitats, polar outposts) where continuous ground communication cannot be assumed.
+
+ORBITA processes multi-modal video and sensor inputs locally at the edge, extracts 3D human pose representations (SMPL-24), recognizes temporal activity patterns (PyTorch GRU), verifies manual procedural execution using a safety-critical Finite State Machine (FSM), generates canonical Section 20 JSON results with SHA-256 integrity validation, buffers records locally in SQLite, and synchronizes with Mission Control whenever the ground link becomes available.
+
+---
+
+## 2. Core Workflow Architecture
 
 ```text
-Phone IP Camera / Jetson Cam / Simulation
-                    │
-                    ▼
-          Camera Manager (OpenCV)
-          (Low-latency drop-stale buffer)
-                    │
-                    ▼
-          Real-Time Perception Pipeline
-          ├── Object Detector (YOLOv8 + Ambient Chroma)
-          ├── Pose Estimator (YOLOv8-Pose, 17 Keypoints)
-          └── Hand Tracker (L/R Wrists & Fingertip Trajectory)
-                    │
-                    ▼
-          Feature Fusion
-          (30-frame temporal sliding window, 64-dim vector)
-                    │
-                    ▼
-          Temporal HAR (Action Classifier)
-                    │
-                    ▼
-          Procedural Reasoning
-          ├── Finite State Machine (Step Verification)
-          ├── Rule Engine (Out-of-sequence, wrong object, skipped steps)
-          └── Audio & HUD Feedback Generator (TTS)
-                    │
-                    ▼
-          FastAPI & React Dashboard (frontend)
-          (Real-time video feed, overlays, telemetry WebSocket, mission control)
+EXPERIMENT INPUT (Video / Stream / Sim)
+     │
+     ▼
+LOCAL EDGE PROCESSING (YOLOv8 Object Detection)
+     │
+     ▼
+HUMAN MESH RECOVERY (HMR / 24 SMPL 3D Joints & Orientation)
+     │
+     ▼
+TEMPORAL REASONING (30-Frame Sliding Window Feature Fusion)
+     │
+     ▼
+ACTIVITY RECOGNITION (Dual-Head PyTorch GRU)
+     │
+     ▼
+EXPERIMENT INTELLIGENCE (Procedural FSM & Rule Engine R01–R07)
+     │
+     ▼
+SECTION 20 STRUCTURED RESULT (Canonical JSON + SHA-256 Checksum)
+     │
+     ▼
+LOCAL PERSISTENCE (SQLite Database: experiments/orbita.db)
+     │
+     ▼
+OFFLINE SYNCHRONIZATION QUEUE (Retry & Idempotent Duplicate Protection)
+     │
+     ▼
+GROUND CONTROL SYSTEM (HTTP 200 ACK / Hash Verification)
 ```
 
 ---
 
-## Directory Structure
+## 3. Technology Stack
 
-```text
-ORBITA/
-├── config/                               # Central configuration & experiment steps
-│   ├── experiment_config.json            # Step definitions, expected objects & timeouts
-│   └── orbita_config.json                # Hardware, model, voice & logging settings
-│
-├── data/                                 # Runtime data storage
-│   └── .gitkeep
-│
-├── experiments/                          # Database & runtime experiment sessions
-│   ├── .gitkeep
-│   └── orbita.db                         # SQLite session database
-│
-├── models/                               # AI Neural Network Weights
-│   ├── yolov8n.pt                        # YOLOv8 Object Detection (COCO classes)
-│   └── yolov8n-pose.pt                   # YOLOv8 Pose Estimation (17 keypoints)
-│
-├── server/                               # Top-level API service facade (uvicorn server.server:app)
-│   ├── __init__.py
-│   └── server.py
-│
-├── core_ai/                              # Core Python Edge-AI Package
-│   ├── app/                              # Configuration loaders
-│   ├── backend/                          # FastAPI REST API & WebSocket Server
-│   ├── database/                         # SQLite session persistence
-│   ├── har/                              # Human Activity Recognition & Feature Fusion
-│   ├── interaction/                      # Hand-object spatial interaction tracking
-│   ├── logging/                          # Experiment session event logger
-│   ├── perception/                       # Computer Vision (YOLOv8, Pose, Hands)
-│   ├── reasoning/                        # Finite State Machine & Rule Engine
-│   ├── simulation/                       # Offline synthetic simulator (Scenarios A/B/C)
-│   ├── video/                            # Unified Camera Manager & Low-Latency IP Camera
-│   └── voice/                            # Pyttsx3 offline astronaut voice assistant
-│
-├── frontend/                             # Unified React + Vite Frontend
-│   ├── src/
-│   │   ├── api/                          # Camera & telemetry client hooks
-│   │   ├── components/                   # CameraControlPanel, status, metrics
-│   │   ├── mission-control/              # Integrated Mission Control suite
-│   │   └── pages/                        # LiveExperiment, Diagnostics, Timeline
-│   ├── package.json
-│   └── vite.config.ts
-│
-├── archive/                              # Consolidated legacy implementations
-│   ├── README.md                         # Documentation of archived modules
-│   ├── frontend-prototype/               # Initial prototype React application
-│   └── orbita-mission-control/           # Standalone mission control template
-│
-├── tests/                                # Automated Pytest Suite (61 tests)
-│   ├── test_camera.py                    # IP webcam validation & buffer tests
-│   ├── test_end_to_end.py                # End-to-end scenario validation (A/B/C)
-│   ├── test_fsm.py                       # FSM state transition & rule engine tests
-│   ├── test_har.py                       # HAR feature window & prediction tests
-│   └── test_perception.py                # Object detection, pose & hand tracking tests
-│
-├── scripts/                              # Deployment & utility automation
-│   ├── download_models.py                # Model verification/download utility
-│   └── run_jetson.sh                     # Jetson Orin Nano boot & launch script
-│
-├── docs/                                 # Architectural & deployment specifications
-│   ├── ARCHITECTURE.md                   # Full end-to-end pipeline architecture
-│   └── JETSON_DEPLOYMENT.md              # Hardware setup & performance guide
-│
-├── main.py                               # Top-level CLI launcher (web, desktop, headless)
-├── requirements.txt                      # Python dependencies
-├── HOW_TO_RUN.md                         # Quick-start execution guide
-└── .gitignore                            # Clean Git repository ignore rules
+- **Frontend**: React 19, TypeScript 5.8, Tailwind CSS 4, Vite 8, Recharts
+- **Backend**: Python 3.13, FastAPI, Pydantic, Uvicorn
+- **Computer Vision**: OpenCV, YOLOv8 (`yolov8n.pt`, custom fine-tuned weights), MediaPipe
+- **Human Mesh Recovery**: 24-Joint SMPL 3D Kinematic Lifter (`HMRPipeline`) with explicit fallback transparency
+- **Temporal HAR**: PyTorch GRU (30-frame temporal window, 64-dim feature vector)
+- **Procedural Engine**: 13-step deterministic FSM + Dynamic JSON Rule Engine
+- **Data Integrity**: Cryptographic canonical JSON serialization + SHA-256 checksums
+- **Database & Sync**: SQLite3 (`orbita.db`) + `SyncQueueManager` + `GroundStationReceiver`
+- **Edge AI Compute**: NVIDIA Jetson Orin Nano (Target) / Development CPU & CUDA (Active)
+
+---
+
+## 4. Quick Start
+
+### Prerequisites
+- Python 3.10+ (Tested on Python 3.13)
+- Node.js 18+ and npm
+
+### Installation
+1. Clone the repository and install backend dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Build the React frontend:
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   ```
+
+### Launching ORBITA
+Start the integrated server:
+```bash
+python main.py --mode web
+```
+Navigate in your browser to:
+```
+http://localhost:8000/mission
 ```
 
 ---
 
-## Quick Start
+## 5. Running the 18-Step Deterministic Demo
 
-### 1. Start Backend
+To run the end-to-end verification demo:
+1. Open the UI at `http://localhost:8000/mission` or `/experiments/EXP-01/live`.
+2. Click the **[RUN ORBITA DEMO]** button on the top navigation bar.
+3. Observe the live 18-step trace from video input, YOLO, 3D HMR, activity recognition, FSM transition, ground connection loss, local offline storage, link restoration, and final Ground ACK with verified SHA-256 checksum.
+
+---
+
+## 6. Running Automated Tests
+
+Run the complete 182-test automated suite:
 ```bash
-python main.py --mode web --scenario A
+pytest tests/ -v
 ```
+All 182 tests pass 100% with zero regressions.
 
-### 2. Start Frontend
-```bash
-cd frontend
-npm run dev
-```
-Open **`http://localhost:5173`** in your browser.
+---
 
-For complete execution instructions, see [HOW_TO_RUN.md](HOW_TO_RUN.md).
+## 7. Documentation Index
+
+- [`docs/PROJECT_AUDIT.md`](docs/PROJECT_AUDIT.md): Comprehensive initial audit and post-implementation verification matrix.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): Complete subsystem architecture document.
+- [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md): Architecture Decision Records (ADRs).
+- [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md): Evaluator step-by-step demonstration walkthrough.
+- [`docs/API.md`](docs/API.md): Full REST API & WebSocket reference.
+- [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md): Transparent documentation of constraints and prototype assumptions.

@@ -70,7 +70,7 @@ STEP_SPECS: Dict[int, StepValidationSpec] = {
         expected_after_state={"held": True, "displaced": True, "displacement_px_min": 20.0},
         minimum_confidence=0.70,
         minimum_duration=0.5,
-        temporal_confirmation_frames=3,
+        temporal_confirmation_frames=2,
         movement_threshold_px=20.0,
         failure_condition="WRONG_OBJECT_PICKED_UP",
     ),
@@ -115,7 +115,7 @@ STEP_SPECS: Dict[int, StepValidationSpec] = {
         expected_after_state={"held": True, "displaced": True, "displacement_px_min": 20.0},
         minimum_confidence=0.70,
         minimum_duration=0.5,
-        temporal_confirmation_frames=3,
+        temporal_confirmation_frames=2,
         movement_threshold_px=20.0,
         failure_condition="WRONG_OBJECT_PICKED_UP",
     ),
@@ -130,7 +130,7 @@ STEP_SPECS: Dict[int, StepValidationSpec] = {
         expected_after_state={"destination": "LOCATION_B", "released": True, "stationary": True},
         minimum_confidence=0.70,
         minimum_duration=0.5,
-        temporal_confirmation_frames=3,
+        temporal_confirmation_frames=2,
         movement_threshold_px=15.0,
         failure_condition="PLACED_OUTSIDE_LOCATION_B",
     ),
@@ -145,7 +145,7 @@ STEP_SPECS: Dict[int, StepValidationSpec] = {
         expected_after_state={"held": True, "displaced": True, "displacement_px_min": 20.0},
         minimum_confidence=0.65,
         minimum_duration=0.5,
-        temporal_confirmation_frames=3,
+        temporal_confirmation_frames=2,
         movement_threshold_px=20.0,
         failure_condition="WRONG_OBJECT_PICKED_UP",
     ),
@@ -160,7 +160,7 @@ STEP_SPECS: Dict[int, StepValidationSpec] = {
         expected_after_state={"target_container": "BLUE_BOX", "released": True, "stationary": True},
         minimum_confidence=0.65,
         minimum_duration=0.5,
-        temporal_confirmation_frames=3,
+        temporal_confirmation_frames=2,
         movement_threshold_px=15.0,
         failure_condition="PLACED_OUTSIDE_BLUE_BOX",
     ),
@@ -175,7 +175,7 @@ STEP_SPECS: Dict[int, StepValidationSpec] = {
         expected_after_state={"held": True, "displaced": True, "displacement_px_min": 20.0},
         minimum_confidence=0.65,
         minimum_duration=0.5,
-        temporal_confirmation_frames=3,
+        temporal_confirmation_frames=2,
         movement_threshold_px=20.0,
         failure_condition="WRONG_OBJECT_PICKED_UP",
     ),
@@ -190,7 +190,7 @@ STEP_SPECS: Dict[int, StepValidationSpec] = {
         expected_after_state={"target_container": "YELLOW_BOX", "released": True, "stationary": True},
         minimum_confidence=0.65,
         minimum_duration=0.5,
-        temporal_confirmation_frames=3,
+        temporal_confirmation_frames=2,
         movement_threshold_px=15.0,
         failure_condition="PLACED_OUTSIDE_YELLOW_BOX",
     ),
@@ -205,7 +205,7 @@ STEP_SPECS: Dict[int, StepValidationSpec] = {
         expected_after_state={"location": "LOCATION_B", "displacement_px_min": 80.0, "released": True, "stationary": True},
         minimum_confidence=0.70,
         minimum_duration=0.8,
-        temporal_confirmation_frames=3,
+        temporal_confirmation_frames=2,
         movement_threshold_px=80.0,
         failure_condition="MOVED_TO_WRONG_LOCATION",
     ),
@@ -220,7 +220,7 @@ STEP_SPECS: Dict[int, StepValidationSpec] = {
         expected_after_state={"location": "LOCATION_A", "displacement_px_min": 80.0, "released": True, "stationary": True},
         minimum_confidence=0.70,
         minimum_duration=0.8,
-        temporal_confirmation_frames=3,
+        temporal_confirmation_frames=2,
         movement_threshold_px=80.0,
         failure_condition="MOVED_TO_WRONG_LOCATION",
     ),
@@ -262,8 +262,15 @@ def get_step_validation_spec(step: Any) -> StepValidationSpec:
         return getattr(step, k, default)
 
     s_id = _get("id", 0)
+    act_str = str(_get("action", "")).upper()
+    exp_act = str(_get("expected_action", "")).upper()
     if s_id in STEP_SPECS:
-        return STEP_SPECS[s_id]
+        spec_act = STEP_SPECS[s_id].required_action.upper()
+        if not act_str and not exp_act:
+            return STEP_SPECS[s_id]
+        if (act_str and (act_str.startswith(spec_act) or spec_act.startswith(act_str))) or \
+           (exp_act and (exp_act.startswith(spec_act) or spec_act.startswith(exp_act))):
+            return STEP_SPECS[s_id]
 
     # Dynamic fallback based on step attributes
     label = _get("label", _get("action", ""))

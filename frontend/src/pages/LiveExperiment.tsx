@@ -15,11 +15,19 @@ import {
   RotateCcw,
   Film,
   Volume2,
-  VolumeX
+  VolumeX,
+  Play,
+  Wifi,
+  WifiOff,
+  FileText,
+  Box
 } from 'lucide-react';
 import CameraControlPanel from '../components/camera/CameraControlPanel';
 import { rotateCamera, type CameraStatus, BACKEND_BASE } from '../api/camera';
 import type { ChecklistItem } from '../api/types';
+import HmrMeshViewer from '../components/hmr/HmrMeshViewer';
+import OrbitaDemoModal from '../components/demo/OrbitaDemoModal';
+import StructuredResultModal from '../components/results/StructuredResultModal';
 
 // Official 13-Step Sequence strictly matching Section 2 of Master Specification
 const OFFICIAL_13_STEPS = [
@@ -54,6 +62,41 @@ export default function LiveExperiment() {
   const [isDebugMode, setIsDebugMode] = useState(true);
   const [rotation, setRotation] = useState<number>(0);
   const [availableVideos, setAvailableVideos] = useState<any[]>([]);
+
+  // Ground link, HMR viewer, and demo modals state
+  const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
+  const [isResultModalOpen, setIsResultModalOpen] = useState(false);
+  const [isGroundOnline, setIsGroundOnline] = useState(true);
+  const [showHmrViewer, setShowHmrViewer] = useState(true);
+
+  useEffect(() => {
+    fetch(`${BACKEND_BASE}/api/sync/status`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ground_link_online !== undefined) setIsGroundOnline(d.ground_link_online);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if ((data as any)?.ground_link) {
+      setIsGroundOnline((data as any).ground_link === 'ONLINE');
+    }
+  }, [data]);
+
+  const toggleGroundLink = async () => {
+    const nextVal = !isGroundOnline;
+    setIsGroundOnline(nextVal);
+    try {
+      await fetch(`${BACKEND_BASE}/api/sync/ground_link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ online: nextVal }),
+      });
+    } catch (e) {
+      console.warn("Failed to toggle ground link:", e);
+    }
+  };
 
   // Fetch available vdata videos dynamically so any new videos appear in the selector
   useEffect(() => {
@@ -555,6 +598,57 @@ export default function LiveExperiment() {
                 style={{ width: `${Math.min(100, Math.max(5, state.progress_pct || ((state.current_step_idx + 1) / (state.total_steps || protocolSteps.length)) * 100))}%` }}
               />
             </div>
+
+            {/* Mission Operational Controls: Demo, Structured JSON, Ground Link, 3D HMR */}
+            <div className="mt-3 pt-2.5 border-t border-space-800 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsDemoModalOpen(true)}
+                className="px-2.5 py-1 bg-accent-cyan hover:bg-accent-cyan/80 text-space-950 font-mono font-bold text-[10.5px] rounded flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                title="Launch 18-step deterministic ORBITA demo"
+              >
+                <Play size={11} />
+                <span>RUN ORBITA DEMO</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsResultModalOpen(true)}
+                className="px-2.5 py-1 bg-space-800 hover:bg-space-700 text-accent-cyan border border-space-700 font-mono font-bold text-[10.5px] rounded flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="View Section 20 Structured JSON Result with SHA-256 Checksum"
+              >
+                <FileText size={11} />
+                <span>STRUCTURED JSON</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={toggleGroundLink}
+                className={clsx(
+                  "px-2.5 py-1 font-mono font-bold text-[10.5px] rounded flex items-center gap-1.5 border transition-colors cursor-pointer",
+                  isGroundOnline 
+                    ? "bg-emerald-950/60 border-emerald-700/80 text-emerald-300 hover:bg-emerald-900/60"
+                    : "bg-red-950/70 border-red-700/80 text-red-300 hover:bg-red-900/70"
+                )}
+                title="Toggle ground station link connection"
+              >
+                {isGroundOnline ? <Wifi size={11} className="text-emerald-400" /> : <WifiOff size={11} className="text-red-400 animate-pulse" />}
+                <span>{isGroundOnline ? "GROUND: ONLINE" : "GROUND: OFFLINE"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowHmrViewer(!showHmrViewer)}
+                className={clsx(
+                  "px-2 py-1 font-mono font-bold text-[10px] rounded flex items-center gap-1 border transition-colors cursor-pointer ml-auto",
+                  showHmrViewer ? "bg-purple-950/60 border-purple-700 text-purple-300" : "bg-space-800 border-space-700 text-space-400"
+                )}
+                title="Toggle 3D Human Mesh Recovery Telemetry Card"
+              >
+                <Box size={11} />
+                <span>3D HMR</span>
+              </button>
+            </div>
           </div>
 
           {/* Current Reasoning State Box */}
@@ -786,6 +880,13 @@ export default function LiveExperiment() {
                 </div>
               </div>
             </div>
+
+            {/* 3D Human Mesh Recovery (HMR) SMPL Telemetry Viewer */}
+            {showHmrViewer && (
+              <div className="mt-3">
+                <HmrMeshViewer hmrData={(data as any)?.hmr || (state as any)?.hmr} />
+              </div>
+            )}
           </div>
 
           {/* PROTOCOL TIMELINE (Official 13-Step Sequence) */}
@@ -1135,6 +1236,18 @@ export default function LiveExperiment() {
         </div>
 
       </div>
+
+      {/* Global Modals for Demo and Structured Result Viewer */}
+      <OrbitaDemoModal
+        isOpen={isDemoModalOpen}
+        onClose={() => setIsDemoModalOpen(false)}
+        onViewResults={() => setIsResultModalOpen(true)}
+      />
+      <StructuredResultModal
+        isOpen={isResultModalOpen}
+        onClose={() => setIsResultModalOpen(false)}
+        experimentId={id || state.experiment_id || "EXP-01"}
+      />
     </div>
   );
 }

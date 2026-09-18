@@ -117,6 +117,10 @@ class DatasetManager:
         elif n == 2:
             mapping[video_ids[0]] = "train"
             mapping[video_ids[1]] = "val"
+        elif n == 3:
+            mapping[video_ids[0]] = "train"
+            mapping[video_ids[1]] = "val"
+            mapping[video_ids[2]] = "test"
         else:
             n_train = max(1, int(round(n * train_ratio)))
             n_val = max(1, int(round(n * val_ratio)))

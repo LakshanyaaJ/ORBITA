@@ -107,7 +107,7 @@ def run_frames(
             window = feature_window.get_window()
             prediction = classifier.predict(window)
 
-        result = state_manager.process(prediction, objects)
+        result = state_manager.process(prediction, detected_objects=objects, interactions=interactions)
         results.append(result)
     return results
 

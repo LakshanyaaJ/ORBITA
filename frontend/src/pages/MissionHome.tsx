@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   CheckCircle, 
@@ -8,12 +9,40 @@ import {
   Video, 
   Radio, 
   ArrowRight, 
-  ExternalLink 
+  ExternalLink,
+  Wifi,
+  WifiOff,
+  Server
 } from 'lucide-react';
 import clsx from 'clsx';
+import { BACKEND_BASE } from '../api/camera';
 
 export default function MissionHome() {
   const navigate = useNavigate();
+  const [systemData, setSystemData] = useState<any>(null);
+  const [syncData, setSyncData] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [sysRes, syncRes] = await Promise.all([
+          fetch(`${BACKEND_BASE}/api/system/status`),
+          fetch(`${BACKEND_BASE}/api/sync/status`),
+        ]);
+        if (sysRes.ok) setSystemData(await sysRes.json());
+        if (syncRes.ok) setSyncData(await syncRes.json());
+      } catch (e) {
+        // Backend offline or initial load
+      }
+    };
+
+    fetchData();
+    const timer = setInterval(fetchData, 2500);
+    return () => clearInterval(timer);
+  }, []);
+
+  const isGroundOnline = syncData?.ground_link_online ?? (systemData?.ground_link === 'ONLINE');
+  const pendingCount = syncData?.pending_count ?? (systemData?.pending_sync ?? 0);
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8">
@@ -33,18 +62,30 @@ export default function MissionHome() {
             Mission Overview
           </h1>
           <p className="text-space-400 text-sm mt-1">
-            Real-time astronaut activity and procedure verification.
+            Real-time astronaut activity, HMR 3D kinematics, and procedure verification.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-space-800 border border-space-600 rounded-md text-xs font-mono text-space-400 shadow-xs">
-            <span className="w-2 h-2 rounded-full bg-status-success"></span>
-            <span>Last sync: {new Date().toLocaleTimeString('en-US', { hour12: false })}</span>
+          <div className={clsx(
+            "flex items-center gap-2 px-3 py-1.5 border rounded-md text-xs font-mono shadow-xs",
+            isGroundOnline ? "bg-space-800 border-space-600 text-space-400" : "bg-red-950/60 border-red-800 text-red-300"
+          )}>
+            {isGroundOnline ? (
+              <span className="w-2 h-2 rounded-full bg-status-success"></span>
+            ) : (
+              <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span>
+            )}
+            <span>GROUND: {isGroundOnline ? "ONLINE" : "OFFLINE (Autonomous)"}</span>
+            {pendingCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                {pendingCount} PENDING
+              </span>
+            )}
           </div>
           <button
             onClick={() => navigate('/mission-control')}
-            className="flex items-center gap-2 px-3.5 py-1.5 bg-space-800 hover:bg-space-700 text-accent-cyan border border-space-600 hover:border-accent-cyan rounded-md text-xs font-mono font-bold tracking-wider transition-all shadow-xs"
+            className="flex items-center gap-2 px-3.5 py-1.5 bg-space-800 hover:bg-space-700 text-accent-cyan border border-space-600 hover:border-accent-cyan rounded-md text-xs font-mono font-bold tracking-wider transition-all shadow-xs cursor-pointer"
           >
             <Radio size={14} />
             <span>MISSION CONTROL VIEW</span>
@@ -56,27 +97,30 @@ export default function MissionHome() {
       {/* 4-Metric KPI Summary Row matching Mission Control */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard 
-          label="CURRENT ACTIVITY" 
-          value="Tool Pickup" 
-          sub="ASTRONAUT-01" 
-          tag="ACT-04" 
+          label="ACTIVE COMPUTE" 
+          value={systemData?.cuda_available ? "CUDA GPU" : "DEV CPU"} 
+          sub={systemData?.target_hardware || "Target: Jetson Orin Nano"} 
+          tag={systemData?.cuda_available ? "CUDA" : "DEV"} 
+          tone="primary"
         />
         <MetricCard 
-          label="AI CONFIDENCE" 
-          value="97.4%" 
-          sub="Stable recognition" 
-          tone="primary" 
+          label="GROUND LINK" 
+          value={isGroundOnline ? "ONLINE" : "OFFLINE"} 
+          sub={pendingCount > 0 ? `${pendingCount} payloads in queue` : "All results synchronized"} 
+          tone={isGroundOnline ? "success" : undefined}
+          tag={isGroundOnline ? "SYNC" : "AUTONOMOUS"}
         />
         <MetricCard 
-          label="PROCEDURE" 
-          value="04 / 08" 
-          sub="Emergency equipment" 
+          label="AI PIPELINE" 
+          value={systemData?.latency_ms ? `${Math.round(systemData.latency_ms)}ms` : "45ms"} 
+          sub={`${systemData?.fps ? systemData.fps.toFixed(1) : "30.0"} FPS · YOLO+HMR+GRU`} 
         />
         <MetricCard 
-          label="STATUS" 
-          value="Verified" 
-          sub="No safety interlock" 
+          label="DATA INTEGRITY" 
+          value="SHA-256" 
+          sub="Canonical payload verification" 
           tone="success" 
+          tag="SECURE"
         />
       </div>
 
@@ -151,10 +195,12 @@ export default function MissionHome() {
           </div>
           
           <div className="bg-space-800 border border-space-600 rounded-lg p-5 space-y-3.5 font-mono text-xs shadow-xs">
-            <ReadinessRow icon={Camera} label="CAMERA SUBSYSTEM" status="READY" detail="30 FPS · Low Latency" />
+            <ReadinessRow icon={Camera} label="CAMERA SUBSYSTEM" status="READY" detail={`${systemData?.fps ? systemData.fps.toFixed(1) : "30.0"} FPS · Low Latency`} />
             <ReadinessRow icon={HardDrive} label="TELEMETRY STORAGE" status="READY" detail="SQLite · orbita.db" />
             <ReadinessRow icon={Video} label="REALTIME STREAMING" status="READY" detail="MJPEG · WebSockets" />
-            <ReadinessRow icon={Cpu} label="EDGE AI ENGINE" status="READY" detail="YOLOv8 + Spatial HAR" />
+            <ReadinessRow icon={Cpu} label="EDGE AI ENGINE" status="READY" detail="YOLOv8 + 24-Joint HMR + GRU" />
+            <ReadinessRow icon={isGroundOnline ? Wifi : WifiOff} label="GROUND SYNC QUEUE" status={isGroundOnline ? "ONLINE" : "OFFLINE"} detail={`${pendingCount} Buffered Record(s)`} />
+            <ReadinessRow icon={Server} label="EDGE COMPUTE NODE" status={systemData?.cuda_available ? "CUDA" : "CPU"} detail={`Target: Jetson Orin Nano`} />
           </div>
 
           {/* Aerospace Blueprint Graphic Widget */}

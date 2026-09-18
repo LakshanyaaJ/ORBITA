@@ -66,6 +66,8 @@ IDX_L_HIP = 11
 IDX_R_HIP = 12
 
 
+from core_ai.perception.hmr_pipeline import HMRPipeline, HMRMeshResult
+
 @dataclass
 class PoseResult:
     """Pose estimation result for one person in one frame."""
@@ -75,6 +77,7 @@ class PoseResult:
     bbox: tuple[int, int, int, int]    # (x, y, w, h) person bounding box
     overall_confidence: float
     timestamp: float = 0.0
+    hmr_mesh: Optional[HMRMeshResult] = None
 
     @property
     def left_wrist(self) -> np.ndarray:
@@ -112,6 +115,7 @@ class PoseEstimator:
         self.backend = config.backend
         self._model = None
         self._mp_pose = None
+        self.hmr = HMRPipeline()
 
         self._frame_count: int = 0
         self._last_poses: list[PoseResult] = []
@@ -138,10 +142,18 @@ class PoseEstimator:
     ) -> list[PoseResult]:
         self._frame_count += 1
         if self.backend == "yolo":
-            return self._estimate_yolo(frame, timestamp)
-        if self.backend == "mediapipe":
-            return self._estimate_mediapipe(frame, timestamp)
-        return self._estimate_mock(frame, timestamp)
+            poses = self._estimate_yolo(frame, timestamp)
+        elif self.backend == "mediapipe":
+            poses = self._estimate_mediapipe(frame, timestamp)
+        else:
+            poses = self._estimate_mock(frame, timestamp)
+
+        # Attach 3D Human Mesh Recovery (HMR) representation
+        if self.hmr is not None:
+            for p in poses:
+                if p.hmr_mesh is None:
+                    p.hmr_mesh = self.hmr.process(frame, p.bbox, keypoints_2d=p.keypoints_px)
+        return poses
 
     def draw(self, frame: np.ndarray, results: list[PoseResult]) -> np.ndarray:
         """Draw skeleton on frame."""

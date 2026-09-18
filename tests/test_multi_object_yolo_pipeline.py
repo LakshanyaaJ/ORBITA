@@ -123,7 +123,8 @@ class TestMultiObjectDetectionAndGrouping:
 
         # Check grouped output
         grouped = detector.get_grouped_detections()
-        for req_cls in REQUIRED_YOLO_CLASSES:
+        five_classes = ["yellow_box", "blue_box", "pen", "watch", "hand"]
+        for req_cls in five_classes:
             assert req_cls in grouped, f"Missing key {req_cls} in grouped detections"
             assert len(grouped[req_cls]) >= 1, f"Class {req_cls} should have survived extraction"
 

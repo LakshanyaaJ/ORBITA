@@ -51,7 +51,7 @@ start "ORBITA - Backend" cmd /k "title ORBITA - Backend && cd /d "%ROOT_DIR%" &&
 
 :: Wait dynamically for backend to finish loading models and open port 8000
 echo [*] Waiting for Backend models to load and port 8000 to be ready...
-powershell -NoProfile -Command "for ($i=0; $i -lt 30; $i++) { try { $client = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 8000); if ($client.Connected) { $client.Close(); exit 0 } } catch {}; Start-Sleep -Seconds 1 }; exit 0"
+powershell -NoProfile -Command "$ready = $false; for ($i=0; $i -lt 60; $i++) { try { $client = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 8000); if ($client.Connected) { $client.Close(); $ready = $true; break } } catch {}; Start-Sleep -Seconds 1 }; if (-not $ready) { Write-Host '[!] Backend took longer than 60s to start. Check backend window for details.' }"
 
 echo [*] Starting ORBITA Frontend (Vite on Port 5173)...
 start "ORBITA - Frontend" cmd /k "title ORBITA - Frontend && cd /d "%ROOT_DIR%frontend" && npm run dev"

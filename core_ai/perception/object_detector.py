@@ -130,6 +130,7 @@ def audit_model_classes(model_names: dict[int, str] | list[str]) -> list[str]:
     for req_cls in REQUIRED_YOLO_CLASSES:
         if req_cls not in mapped_app_classes:
             print(f"MISSING MODEL CLASS: {req_cls}")
+            print(f"MODEL DOES NOT CONTAIN REQUIRED CLASS: {req_cls}")
             logger.warning("MISSING MODEL CLASS: %s", req_cls)
             missing_classes.append(req_cls)
 

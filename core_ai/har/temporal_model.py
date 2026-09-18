@@ -32,8 +32,10 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -54,6 +56,39 @@ ACTIONS = [
 NUM_ACTIONS = len(ACTIONS)
 ACTION_IDX = {a: i for i, a in enumerate(ACTIONS)}
 
+# Canonical Human Activities (Section 8 of Master Architecture Specification)
+HUMAN_ACTIVITIES = [
+    "standing",
+    "walking",
+    "reaching",
+    "handling",
+    "inspection",
+    "interaction",
+    "unknown",
+]
+
+
+def map_action_to_human_activity(
+    action: str, target_object: Optional[str] = None, is_uncertain: bool = False
+) -> Tuple[str, float]:
+    """Map procedural/kinematic action to canonical Human Activity classes."""
+    if is_uncertain:
+        return "unknown", 0.40
+    act = (action or "").upper().strip()
+    if act in ("TAKE", "PICKUP", "PLACE", "TRANSFER", "MOVE", "STORE"):
+        return "handling", 0.91
+    elif act in ("IDENTIFY", "INSPECT", "OBSERVE"):
+        return "inspection", 0.89
+    elif act in ("OPEN", "CLOSE", "ACTIVATE", "PERFORM"):
+        return "interaction", 0.88
+    elif act in ("REACH", "APPROACH"):
+        return "reaching", 0.84
+    elif act in ("IDLE", "STAND"):
+        return "standing", 0.85
+    elif act in ("WALK", "STEP"):
+        return "walking", 0.82
+    return "unknown", 0.50
+
 
 @dataclass
 class ActionPrediction:
@@ -63,6 +98,11 @@ class ActionPrediction:
     next_confidence: float
     is_uncertain: bool          # True if confidence < threshold
     target_object: Optional[str] = None
+    human_activity: str = "standing"
+    human_activity_confidence: float = 0.85
+    start_time: float = 0.0
+    end_time: float = 0.0
+    duration_seconds: float = 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -248,6 +288,9 @@ class ActionClassifier:
             self._torch = torch_module
             self._try_load_model(ModelClass, config)
 
+        self._current_activity = "standing"
+        self._activity_start_time = time.time()
+
         if self._model is None:
             logger.info(
                 "Temporal GRU model not available — using heuristic action classifier."
@@ -272,8 +315,22 @@ class ActionClassifier:
             ActionPrediction
         """
         if self._model is not None:
-            return self._predict_torch(window)
-        return _heuristic_predict(window, self.confidence_threshold)
+            pred = self._predict_torch(window)
+        else:
+            pred = _heuristic_predict(window, self.confidence_threshold)
+
+        hum_act, hum_conf = map_action_to_human_activity(pred.action, pred.target_object, pred.is_uncertain)
+        now = time.time()
+        if hum_act != self._current_activity:
+            self._current_activity = hum_act
+            self._activity_start_time = now
+
+        pred.human_activity = hum_act
+        pred.human_activity_confidence = hum_conf
+        pred.start_time = self._activity_start_time
+        pred.end_time = now
+        pred.duration_seconds = round(now - self._activity_start_time, 2)
+        return pred
 
     def _predict_torch(self, window: np.ndarray) -> ActionPrediction:
         try:

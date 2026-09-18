@@ -64,7 +64,8 @@ class ModelRegistry:
                 with open(self.registry_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 for ver, item in data.items():
-                    self._records[ver] = ModelVersionRecord(**item)
+                    if isinstance(item, dict) and "version" in item:
+                        self._records[ver] = ModelVersionRecord(**item)
             except Exception as exc:
                 logger.warning("Failed to parse model registry: %s", exc)
 
