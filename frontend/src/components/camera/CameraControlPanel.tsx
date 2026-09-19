@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Camera, Settings, RefreshCw, QrCode, ExternalLink, Smartphone } from 'lucide-react';
+import { Camera, Settings, RefreshCw, QrCode, ExternalLink, Smartphone, Cloud } from 'lucide-react';
 import CameraSourceSelector, { type CameraSourceType } from './CameraSourceSelector';
 import IPWebcamConfig from './IPWebcamConfig';
 import CameraConnectionStatus from './CameraConnectionStatus';
@@ -36,12 +36,9 @@ export default function CameraControlPanel({
   const [isExpanded, setIsExpanded] = useState(true);
   const [showQrModal, setShowQrModal] = useState(false);
   const [vdataVideos, setVdataVideos] = useState<any[]>([]);
+  const [syncingDrive, setSyncingDrive] = useState(false);
 
-  const userEditingRef = useRef(false);
-  const initialLoadRef = useRef(false);
-
-  // Fetch available vdata videos
-  useEffect(() => {
+  const loadVdataVideos = () => {
     fetch(`${BACKEND_BASE}/api/vdata/videos`)
       .then((res) => res.json())
       .then((data) => {
@@ -50,7 +47,33 @@ export default function CameraControlPanel({
         }
       })
       .catch((err) => console.error('Failed to load vdata videos in control panel:', err));
+  };
+
+  // Fetch available vdata videos
+  useEffect(() => {
+    loadVdataVideos();
   }, []);
+
+  const handleQuickDriveSync = async () => {
+    setSyncingDrive(true);
+    try {
+      await fetch(`${BACKEND_BASE}/api/vdata/gdrive/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      // Refresh video list after a moment
+      setTimeout(loadVdataVideos, 2500);
+      setTimeout(loadVdataVideos, 6000);
+    } catch (e) {
+      console.error('Failed to trigger Drive sync:', e);
+    } finally {
+      setTimeout(() => setSyncingDrive(false), 3000);
+    }
+  };
+
+  const userEditingRef = useRef(false);
+  const initialLoadRef = useRef(false);
 
   // Poll camera status periodically
   const fetchStatus = async () => {
@@ -293,6 +316,16 @@ export default function CameraControlPanel({
                   className="px-3 py-1.5 rounded bg-accent-cyan text-space-950 hover:bg-sky-400 font-bold text-xs"
                 >
                   Replay
+                </button>
+                <button
+                  type="button"
+                  disabled={syncingDrive}
+                  onClick={handleQuickDriveSync}
+                  title="Synchronize latest videos from Google Drive"
+                  className="px-2.5 py-1.5 rounded bg-space-800 hover:bg-space-700 text-accent-cyan border border-space-600 text-xs flex items-center gap-1 font-bold disabled:opacity-50"
+                >
+                  <Cloud size={13} className={syncingDrive ? 'animate-pulse' : ''} />
+                  <span>{syncingDrive ? 'Syncing...' : 'Drive Sync'}</span>
                 </button>
               </div>
               {status.total_frames ? (

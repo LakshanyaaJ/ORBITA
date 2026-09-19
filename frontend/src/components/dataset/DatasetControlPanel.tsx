@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Database, Film, Play, RefreshCw, Layers, ShieldCheck } from 'lucide-react';
+import { BACKEND_BASE } from '../../api/camera';
 import VdataVideoInspector from './VdataVideoInspector';
+import GDriveSyncCard from './GDriveSyncCard';
 
 interface DatasetManifest {
   dataset_version: string;
@@ -45,12 +47,12 @@ export default function DatasetControlPanel() {
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/dataset/status');
+      const res = await fetch(`${BACKEND_BASE}/api/dataset/status`);
       if (res.ok) {
         const data = await res.json();
         setDatasetStatus(data);
       }
-      const candRes = await fetch('http://localhost:8000/api/dataset/candidates');
+      const candRes = await fetch(`${BACKEND_BASE}/api/dataset/candidates`);
       if (candRes.ok) {
         const candData = await candRes.json();
         setCandidates(candData);
@@ -70,7 +72,7 @@ export default function DatasetControlPanel() {
     setLoading(true);
     setActionMessage({ type: 'info', text: 'Scanning vdata/ and extracting quality-filtered frames...' });
     try {
-      const res = await fetch('http://localhost:8000/api/dataset/ingest', { method: 'POST' });
+      const res = await fetch(`${BACKEND_BASE}/api/dataset/ingest`, { method: 'POST' });
       const data = await res.json();
       setActionMessage({ type: 'success', text: `Ingestion complete: ${data.manifest?.total_extracted_frames || 0} frames extracted.` });
       fetchStatus();
@@ -85,7 +87,7 @@ export default function DatasetControlPanel() {
     setLoading(true);
     setActionMessage({ type: 'info', text: 'Running assisted YOLO pre-annotation on frames...' });
     try {
-      const res = await fetch('http://localhost:8000/api/dataset/pre_annotate', { method: 'POST' });
+      const res = await fetch(`${BACKEND_BASE}/api/dataset/pre_annotate`, { method: 'POST' });
       const data = await res.json();
       setActionMessage({ type: 'success', text: `Pre-annotated ${data.frames_annotated} frames (${data.boxes_generated} boxes).` });
       fetchStatus();
@@ -100,7 +102,7 @@ export default function DatasetControlPanel() {
     setLoading(true);
     setActionMessage({ type: 'info', text: `Executing controlled retraining for ${modelType.toUpperCase()}...` });
     try {
-      const res = await fetch('http://localhost:8000/api/training/retrain', {
+      const res = await fetch(`${BACKEND_BASE}/api/training/retrain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model_type: modelType, epochs: modelType === 'har' ? 10 : 3 }),
@@ -123,7 +125,7 @@ export default function DatasetControlPanel() {
 
   const handleReviewCandidate = async (runId: string, action: 'approve' | 'reject') => {
     try {
-      const res = await fetch(`http://localhost:8000/api/dataset/candidates/${runId}/review`, {
+      const res = await fetch(`${BACKEND_BASE}/api/dataset/candidates/${runId}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, reviewer: 'mission_specialist', target_split: 'train' }),
@@ -216,6 +218,9 @@ export default function DatasetControlPanel() {
           </div>
         </div>
       </div>
+
+      {/* Google Drive Cloud Dataset Synchronization Panel */}
+      <GDriveSyncCard onSyncComplete={fetchStatus} />
 
       {/* Action Toolbar */}
       <div className="bg-[#0b0f15] p-4 rounded-lg border border-[#1b2433] flex flex-wrap items-center gap-3">

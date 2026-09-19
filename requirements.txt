@@ -44,3 +44,4 @@ pytest-asyncio>=0.23.0
 
 # Utilities
 psutil>=5.9.0               # CPU/memory telemetry
+gdown>=6.4.0                # Google Drive dataset video sync for cloud/deployed access

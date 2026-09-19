@@ -143,3 +143,21 @@ Build the production frontend bundle:
 cd frontend
 npm run build
 ```
+
+---
+
+## 6. Google Drive Dataset Video Access (Cloud & Deployed Environments)
+
+When deploying ORBITA to remote servers, cloud containers, or Jetson boards where dataset videos are not pre-packaged locally, ORBITA can automatically pull and synchronize the video files directly from Google Drive:
+
+- **Reference Folder**: `https://drive.google.com/drive/folders/1kGpbXynDD5PdaklODHo09ZIS-8sdVk2C?usp=sharing`
+- **Folder ID**: `1kGpbXynDD5PdaklODHo09ZIS-8sdVk2C`
+
+### Features:
+1. **Automatic Startup Sync**: When starting ORBITA, if `vdata/` is empty or missing, ORBITA automatically initiates background synchronization from Google Drive.
+2. **Web Dashboard Management**: Navigate to **VDATA & DATASET MANAGEMENT** to view the **Google Drive Dataset Ingestion** panel, scan the remote folder, track download progress, and sync files with 1 click.
+3. **Quick Camera Panel Sync**: Under **Live Experiment** > **Camera Controls** > **Reference Video (vdata/)**, click **Drive Sync** to refresh and pull videos directly.
+4. **API Endpoints**:
+   - `GET /api/vdata/gdrive/status` — Returns Drive folder connection, files catalog, and sync progress.
+   - `POST /api/vdata/gdrive/sync` — Initiates background sync into `vdata/`.
+   - `POST /api/vdata/gdrive/pull_file` — Pulls a single video file by ID.

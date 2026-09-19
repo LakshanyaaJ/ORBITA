@@ -16,11 +16,15 @@ export default function VdataDatasetPage() {
             Local Video Library (vdata/) • Frame-by-Frame Inspector • Quality Gating • Synthetic Frame Extraction
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-xs text-space-400">STORAGE:</span>
           <span className="font-mono text-xs font-bold px-2.5 py-1 rounded bg-[#eafaf1] text-[#2e7d58] border border-[#c1e8d4] flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-[#2e7d58]" />
             vdata/ CONNECTED
+          </span>
+          <span className="font-mono text-xs font-bold px-2.5 py-1 rounded bg-[#0b1726] text-cyan-400 border border-cyan-800 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+            GOOGLE DRIVE CLOUD SYNC
           </span>
         </div>
       </div>

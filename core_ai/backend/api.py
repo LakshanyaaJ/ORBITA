@@ -66,6 +66,7 @@ from core_ai.dataset.frame_extractor import FrameExtractor, ExtractionConfig
 from core_ai.dataset.dataset_manager import DatasetManager
 from core_ai.dataset.annotator import AssistedAnnotator
 from core_ai.dataset.review_queue import ReviewQueue
+from core_ai.dataset.gdrive_sync import gdrive_sync_manager, DEFAULT_GDRIVE_FOLDER_URL, DEFAULT_GDRIVE_FOLDER_ID
 from core_ai.recording.quality_filter import DatasetQualityFilter
 from core_ai.recording.run_collector import RunCollector
 from core_ai.training.model_registry import ModelRegistry
@@ -407,6 +408,13 @@ async def _startup() -> None:
     _state.stream_thread.start()
 
     logger.info("ORBITA low-latency backend initialized (AI Worker + Decoupled Streamer active).")
+
+    # Cloud/Deployed sync: check if vdata/ is empty and auto-sync from Google Drive
+    auto_sync_gdrive = os.getenv("ORBITA_AUTO_SYNC_GDRIVE", "true").lower() in ("true", "1", "yes")
+    vdata_dir = Path("vdata")
+    if auto_sync_gdrive and (not vdata_dir.exists() or len(list(vdata_dir.glob("*.mp4"))) == 0):
+        logger.info("No local reference videos detected in vdata/. Auto-initiating Google Drive cloud sync...")
+        gdrive_sync_manager.start_sync()
 
 
 async def _shutdown() -> None:
@@ -2242,6 +2250,43 @@ async def api_models_promote(body: dict):
     if promoted:
         reloaded = _state.reload_production_models()
     return {"version": version, "promoted": promoted, "message": msg, "reloaded": reloaded}
+
+
+# =========================================================================== #
+# Google Drive Cloud Dataset Synchronization Endpoints
+# =========================================================================== #
+@app.get("/api/vdata/gdrive/status")
+async def api_vdata_gdrive_status():
+    """Returns the current status of Google Drive synchronization, folder ID, and file catalog."""
+    return gdrive_sync_manager.get_status()
+
+
+@app.post("/api/vdata/gdrive/list")
+async def api_vdata_gdrive_list(payload: dict = Body(default_factory=dict)):
+    """Lists files in the Google Drive folder without downloading them."""
+    folder_url = payload.get("folder_url")
+    files = gdrive_sync_manager.list_remote_files(folder_url)
+    return {"status": "ok", "files": files, "count": len(files)}
+
+
+@app.post("/api/vdata/gdrive/sync")
+async def api_vdata_gdrive_sync(payload: dict = Body(default_factory=dict)):
+    """Starts background synchronization of reference videos from Google Drive into vdata/."""
+    folder_url = payload.get("folder_url")
+    force = bool(payload.get("force", False))
+    result = gdrive_sync_manager.start_sync(folder_url_or_id=folder_url, force=force)
+    return result
+
+
+@app.post("/api/vdata/gdrive/pull_file")
+async def api_vdata_gdrive_pull_file(payload: dict = Body(...)):
+    """Downloads a single video file by Google Drive file ID into vdata/."""
+    file_id = payload.get("file_id")
+    file_name = payload.get("file_name")
+    if not file_id or not file_name:
+        raise HTTPException(status_code=400, detail="Both 'file_id' and 'file_name' are required.")
+    success = gdrive_sync_manager.sync_single_file(file_id, file_name)
+    return {"status": "success" if success else "error", "file_name": file_name}
 
 
 # =========================================================================== #
