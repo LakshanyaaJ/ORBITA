@@ -330,7 +330,9 @@ export default function PhoneWebcam() {
       const maxH = resolution.height;
 
       const rot = rotationRef.current;
-      const isRotated = rot === 90 || rot === 270;
+      // Auto-enforce horizontal: if vertical (vh > vw), auto-rotate 90 degrees to landscape
+      const effectiveRot = (rot === 0 || rot === -1) && vh > vw ? 90 : (rot === -1 ? 0 : rot);
+      const isRotated = effectiveRot === 90 || effectiveRot === 270;
 
       // Calculate proportional scale strictly preserving the source camera aspect ratio
       const scale = Math.min(
@@ -347,11 +349,11 @@ export default function PhoneWebcam() {
       if (canvas.width !== canvasW) canvas.width = canvasW;
       if (canvas.height !== canvasH) canvas.height = canvasH;
 
-      // Draw video frame to canvas with optional orientation rotation
-      if (rot !== 0) {
+      // Draw video frame to canvas with horizontal orientation rotation
+      if (effectiveRot !== 0) {
         ctx.save();
         ctx.translate(canvasW / 2, canvasH / 2);
-        ctx.rotate((rot * Math.PI) / 180);
+        ctx.rotate((effectiveRot * Math.PI) / 180);
         ctx.drawImage(video, -targetW / 2, -targetH / 2, targetW, targetH);
         ctx.restore();
       } else {

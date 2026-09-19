@@ -232,14 +232,20 @@ class IPCamera:
         frame, timestamp, _ = self._frame_buffer.get_latest()
         if frame is not None:
             self._latency_ms = max(0.0, (time.monotonic() - timestamp) * 1000.0)
-            rot = getattr(self, "rotation", 0)
+            rot = getattr(self, "rotation", -1)
             fh, fw = frame.shape[:2]
-            if rot == 90 or (rot == -1 and fh > fw):
+            if rot == 90:
                 frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             elif rot == 180:
                 frame = cv2.rotate(frame, cv2.ROTATE_180)
             elif rot == 270:
                 frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            elif (rot in (-1, 0) or rot is None) and fh > fw:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
+            # Failsafe guarantee: every video should play horizontally
+            if frame.shape[0] > frame.shape[1]:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             return frame
 
         # Secondary: fallback to legacy queue (used in unit tests)

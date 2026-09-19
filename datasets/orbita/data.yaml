@@ -1,4 +1,4 @@
-# ORBITA 7-Class Dataset (V4)
+# ORBITA 7-Class Horizontal Dataset (V4)
 path: C:/project/ORBITA/datasets/orbita/v4
 train: images/train
 val: images/val

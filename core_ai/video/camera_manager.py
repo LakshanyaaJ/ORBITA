@@ -19,6 +19,7 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+import cv2
 
 from core_ai.app.config import CameraConfig
 from core_ai.video.camera import Camera
@@ -296,7 +297,7 @@ class CameraManager:
                 flip=False,
             )
             setattr(cfg, "loop_video", loop)
-            setattr(cfg, "rotation", 0)
+            setattr(cfg, "rotation", -1)  # Auto-horizontal: guarantees horizontal orientation
 
             cam = Camera(cfg)
             if cam.start():
@@ -323,6 +324,8 @@ class CameraManager:
 
     def push_sim_frame(self, frame: np.ndarray) -> None:
         """Store simulation frame in the buffer."""
+        if frame is not None and frame.shape[0] > frame.shape[1]:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
         self._sim_buffer.push(frame, time.monotonic())
 
     def disconnect(self) -> None:

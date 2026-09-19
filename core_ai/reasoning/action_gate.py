@@ -307,7 +307,17 @@ class ActionConfirmationGate:
     and temporal persistence against the active step's StepValidationSpec.
     """
 
-    def __init__(self):
+    def __init__(self, config: Any = None):
+        # Master config & physical zones (Section 2)
+        if config is None:
+            try:
+                from core_ai.app.config import load_config
+                self.config = load_config()
+            except Exception:
+                self.config = None
+        else:
+            self.config = config
+
         # Step context
         self.current_spec: Optional[StepValidationSpec] = None
         self._current_step_id: int = -1
@@ -863,24 +873,49 @@ class ActionConfirmationGate:
             "is_contact": is_contact,
         }
 
-        # Location A / Location B tracking cache (Requirement 4)
+        # Location A / Location B tracking cache (Requirement 4 & Section 2 Mandate)
+        zones = getattr(getattr(self.config, "detection", None), "zones", {}) if self.config else {}
+        zone_a = zones.get("LOCATION_A")
         loc_a_item = obj_map.get("LOCATION_A")
         if loc_a_item is not None:
             self._loc_a_detected = True
             b = loc_a_item.bbox
             self._loc_a_bbox = [int(b[0]), int(b[1]), int(b[0] + b[2]), int(b[1] + b[3])]
             self._loc_a_conf = float(getattr(loc_a_item, "confidence", 0.0))
+        elif zone_a is not None:
+            self._loc_a_detected = True
+            poly_a = zone_a.to_pixel_polygon(W, H)
+            if poly_a:
+                xs = [p[0] for p in poly_a]
+                ys = [p[1] for p in poly_a]
+                self._loc_a_bbox = [min(xs), min(ys), max(xs), max(ys)]
+                self._loc_a_conf = 0.99
+            else:
+                self._loc_a_bbox = [int(W * 0.08), int(H * 0.35), int(W * 0.44), int(H * 0.85)]
+                self._loc_a_conf = 0.99
         else:
             self._loc_a_detected = False
             self._loc_a_bbox = []
             self._loc_a_conf = 0.0
 
+        zone_b = zones.get("LOCATION_B")
         loc_b_item = obj_map.get("LOCATION_B")
         if loc_b_item is not None:
             self._loc_b_detected = True
             b = loc_b_item.bbox
             self._loc_b_bbox = [int(b[0]), int(b[1]), int(b[0] + b[2]), int(b[1] + b[3])]
             self._loc_b_conf = float(getattr(loc_b_item, "confidence", 0.0))
+        elif zone_b is not None:
+            self._loc_b_detected = True
+            poly_b = zone_b.to_pixel_polygon(W, H)
+            if poly_b:
+                xs = [p[0] for p in poly_b]
+                ys = [p[1] for p in poly_b]
+                self._loc_b_bbox = [min(xs), min(ys), max(xs), max(ys)]
+                self._loc_b_conf = 0.99
+            else:
+                self._loc_b_bbox = [int(W * 0.56), int(H * 0.35), int(W * 0.92), int(H * 0.85)]
+                self._loc_b_conf = 0.99
         else:
             self._loc_b_detected = False
             self._loc_b_bbox = []
@@ -1442,6 +1477,11 @@ class ActionConfirmationGate:
         is_holding = features.get("is_holding", False)
         obj_speed = features.get("object_velocity", 0.0)
 
+        zones = getattr(getattr(self.config, "detection", None), "zones", {}) if self.config else {}
+        zone_a = zones.get("LOCATION_A")
+        zone_b = zones.get("LOCATION_B")
+        frame_height = int(frame_width * 9 / 16) if frame_width > 0 else 720
+
         in_target = False
         target_det = obj_map.get(exp_obj)
         target_desc = exp_target or "target area"
@@ -1451,18 +1491,25 @@ class ActionConfirmationGate:
         elif curr_centroid is not None:
             cx, cy = curr_centroid
             if "LOCATION_A" in exp_target:
-                loc_a = obj_map.get("LOCATION_A")
-                if loc_a is not None:
-                    ax, ay, aw, ah = loc_a.bbox
-                    in_target = (ax - 25 <= cx <= ax + aw + 25 and ay - 25 <= cy <= ay + ah + 25)
+                if zone_a is not None and zone_a.contains_point((cx, cy), frame_width, frame_height):
+                    in_target = True
                 else:
-                    in_target = (cx < frame_width * 0.50)
+                    loc_a = obj_map.get("LOCATION_A")
+                    if loc_a is not None:
+                        ax, ay, aw, ah = loc_a.bbox
+                        in_target = (ax - 25 <= cx <= ax + aw + 25 and ay - 25 <= cy <= ay + ah + 25)
+                    else:
+                        in_target = (cx < frame_width * 0.50)
             elif "LOCATION_B" in exp_target:
-                loc_b = obj_map.get("LOCATION_B")
-                if loc_b is not None:
-                    bx, by, bw, bh = loc_b.bbox
-                    in_target = (bx - 25 <= cx <= bx + bw + 25 and by - 25 <= cy <= by + bh + 25)
+                if zone_b is not None and zone_b.contains_point((cx, cy), frame_width, frame_height):
+                    in_target = True
                 else:
+                    loc_b = obj_map.get("LOCATION_B")
+                    if loc_b is not None:
+                        bx, by, bw, bh = loc_b.bbox
+                        in_target = (bx - 25 <= cx <= bx + bw + 25 and by - 25 <= cy <= by + bh + 25)
+                    else:
+                        in_target = (cx >= frame_width * 0.50)
                     in_target = (cx >= frame_width * 0.50)
             elif "BLUE_BOX" in exp_target or "BLUE" in exp_target:
                 blue = obj_map.get("BLUE_BOX")
@@ -1614,23 +1661,34 @@ class ActionConfirmationGate:
         is_holding = features.get("is_holding", False)
         obj_speed = features.get("object_velocity", 0.0)
 
+        zones = getattr(getattr(self.config, "detection", None), "zones", {}) if self.config else {}
+        zone_a = zones.get("LOCATION_A")
+        zone_b = zones.get("LOCATION_B")
+        frame_height = int(frame_width * 9 / 16) if frame_width > 0 else 720
+
         reached = False
         if curr_centroid is not None:
             cx, cy = curr_centroid
             if to_loc == "LOCATION_B" or "TO_B" in spec.instruction or "LOCATION_B" in spec.instruction:
-                loc_b = obj_map.get("LOCATION_B")
-                if loc_b is not None:
-                    bx, by, bw, bh = loc_b.bbox
-                    reached = (bx - 25 <= cx <= bx + bw + 25 and by - 25 <= cy <= by + bh + 25)
+                if zone_b is not None and zone_b.contains_point((cx, cy), frame_width, frame_height):
+                    reached = True
                 else:
-                    reached = (cx >= frame_width * 0.50)
+                    loc_b = obj_map.get("LOCATION_B")
+                    if loc_b is not None:
+                        bx, by, bw, bh = loc_b.bbox
+                        reached = (bx - 25 <= cx <= bx + bw + 25 and by - 25 <= cy <= by + bh + 25)
+                    else:
+                        reached = (cx >= frame_width * 0.50)
             elif to_loc == "LOCATION_A" or "TO_A" in spec.instruction or "LOCATION_A" in spec.instruction:
-                loc_a = obj_map.get("LOCATION_A")
-                if loc_a is not None:
-                    ax, ay, aw, ah = loc_a.bbox
-                    reached = (ax - 25 <= cx <= ax + aw + 25 and ay - 25 <= cy <= ay + ah + 25)
+                if zone_a is not None and zone_a.contains_point((cx, cy), frame_width, frame_height):
+                    reached = True
                 else:
-                    reached = (cx < frame_width * 0.50)
+                    loc_a = obj_map.get("LOCATION_A")
+                    if loc_a is not None:
+                        ax, ay, aw, ah = loc_a.bbox
+                        reached = (ax - 25 <= cx <= ax + aw + 25 and ay - 25 <= cy <= ay + ah + 25)
+                    else:
+                        reached = (cx < frame_width * 0.50)
             else:
                 reached = True
         else:

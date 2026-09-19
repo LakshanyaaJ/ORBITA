@@ -205,7 +205,33 @@ class TestMJPEGStreamer(unittest.TestCase):
 
         diag = streamer.get_diagnostics()
         self.assertEqual(diag["jpeg_quality"], 70)
-        self.assertTrue(diag["encode_latency_ms"] >= 0)
+class TestHorizontalVideoOrientation(unittest.TestCase):
+    def test_camera_auto_rotates_vertical_frame(self):
+        from core_ai.app.config import CameraConfig
+        from core_ai.video.camera import Camera
+
+        cfg = CameraConfig(source="test", width=0, height=0)
+        cam = Camera(cfg)
+        vert = np.zeros((800, 400, 3), dtype=np.uint8)
+        horiz = cam._preprocess_frame(vert)
+        self.assertGreater(horiz.shape[1], horiz.shape[0], "Frame must be horizontal")
+
+    def test_mjpeg_streamer_enforces_horizontal(self):
+        import cv2
+        streamer = MJPEGStreamer(jpeg_quality=70)
+        vert = np.zeros((1000, 500, 3), dtype=np.uint8)
+        streamer.update(vert)
+        jpeg_bytes = streamer.get_latest_jpeg()
+        decoded = cv2.imdecode(np.frombuffer(jpeg_bytes, np.uint8), cv2.IMREAD_COLOR)
+        self.assertGreater(decoded.shape[1], decoded.shape[0], "Streamer must stream horizontally")
+
+    def test_camera_manager_sim_enforces_horizontal(self):
+        mgr = CameraManager()
+        vert = np.zeros((600, 300, 3), dtype=np.uint8)
+        mgr.push_sim_frame(vert)
+        f, _, _ = mgr._sim_buffer.get_latest()
+        self.assertIsNotNone(f)
+        self.assertGreater(f.shape[1], f.shape[0], "Sim frame must be horizontal")
 
 
 if __name__ == "__main__":

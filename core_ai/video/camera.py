@@ -46,7 +46,7 @@ class Camera:
         self.height = getattr(config, "height", 720)
         self.fps_target = getattr(config, "fps", 30)
         self.flip = getattr(config, "flip", False)
-        self.rotation = getattr(config, "rotation", 0)
+        self.rotation = getattr(config, "rotation", -1)
         self.loop_video = getattr(config, "loop_video", False)
         self.sequential = getattr(config, "sequential", False)
 
@@ -152,16 +152,27 @@ class Camera:
             return False
 
     def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
+        if frame is None or frame.size == 0:
+            return frame
+
         if self.flip:
             frame = cv2.flip(frame, 1)
 
-        rot = getattr(self, "rotation", 0)
+        rot = getattr(self, "rotation", -1)
+        fh, fw = frame.shape[:2]
         if rot == 90:
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
         elif rot == 180:
             frame = cv2.rotate(frame, cv2.ROTATE_180)
         elif rot == 270:
             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        elif (rot in (-1, 0) or rot is None) and fh > fw:
+            # Mandate: EVERY video should play horizontally
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
+        # Failsafe guarantee: ensure frame is horizontal
+        if frame.shape[0] > frame.shape[1]:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
         fh, fw = frame.shape[:2]
         is_vid = (
@@ -232,8 +243,9 @@ class Camera:
 
     def push_frame(self, frame: np.ndarray) -> None:
         """Push an externally generated frame into the buffer."""
-        if not self._running:
+        if not self._running or frame is None:
             return
+        frame = self._preprocess_frame(frame)
         t = time.monotonic()
         self._frame_buffer.push(frame, t)
         try:

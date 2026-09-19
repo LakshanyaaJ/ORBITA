@@ -367,7 +367,7 @@ DEFAULT_HSV_RANGES: dict[str, tuple[np.ndarray, np.ndarray]] = {
         np.array([135, 255, 255]),
     ),
     "YELLOW_BOX": (
-        np.array([18,  90,   70]),
+        np.array([18,  120,  70]),
         np.array([38,  255, 255]),
     ),
     "RED_BOX": (
@@ -401,18 +401,22 @@ class ObjectDetector:
 
     def __init__(self, config: Any, hsv_ranges: dict | None = None):
         self.config = config
-        self.min_area = getattr(config, "min_area_px", 400)
-        self.confidence_threshold = min(0.25, getattr(config, "confidence_threshold", 0.25))
-        self.iou_threshold = getattr(config, "iou_threshold", 0.45)
+        det_cfg = getattr(config, "detection", config)
+        self.det_cfg = det_cfg
+        self.min_area = getattr(det_cfg, "min_area_px", getattr(config, "min_area_px", 400))
+        self.confidence_threshold = min(0.25, getattr(det_cfg, "confidence_threshold", getattr(config, "confidence_threshold", 0.25)))
+        self.iou_threshold = getattr(det_cfg, "iou_threshold", getattr(config, "iou_threshold", 0.45))
 
         # Class-specific confidence thresholds
         self.class_thresholds: dict[str, float] = dict(DEFAULT_CLASS_THRESHOLDS)
-        if hasattr(config, "class_thresholds") and isinstance(config.class_thresholds, dict):
-            self.class_thresholds.update(config.class_thresholds)
+        c_thresh = getattr(det_cfg, "class_thresholds", getattr(config, "class_thresholds", None))
+        if isinstance(c_thresh, dict):
+            self.class_thresholds.update(c_thresh)
 
         # Build HSV range lookup for fallback/synthetic testing
+        c_ranges = getattr(det_cfg, "color_ranges", getattr(config, "color_ranges", {}))
         self._hsv_ranges = self._build_hsv_ranges(
-            config.color_ranges if hasattr(config, "color_ranges") else {},
+            c_ranges,
             hsv_ranges or {},
         )
 
@@ -421,17 +425,23 @@ class ObjectDetector:
         self._device = "cpu"
         self._active_model_path: str = ""
         self.missing_model_classes: list[str] = []
-        if getattr(config, "use_yolo", True):
-            self._try_load_yolo(getattr(config, "yolo_model_path", "models/orbita_yolo_detector_v3.pt"))
+        use_yolo = getattr(det_cfg, "use_yolo", getattr(config, "use_yolo", True))
+        model_path = getattr(det_cfg, "yolo_model_path", getattr(config, "yolo_model_path", "models/orbita_yolo_detector_v4.pt"))
+        if use_yolo:
+            self._try_load_yolo(model_path)
 
         # Multi-object tracker for persistent identity and trajectory velocity
         from core_ai.perception.object_tracker import MultiObjectTracker
-        self.tracker = MultiObjectTracker(max_age=15, min_hits=1, iou_threshold=0.25)
+        lost_frames = getattr(det_cfg, "object_lost_frames", getattr(config, "object_lost_frames", 8))
+        self.tracker = MultiObjectTracker(max_age=15, min_hits=1, iou_threshold=0.25, object_lost_frames=lost_frames)
 
         # Multi-class temporal smoother: keeps detections across 1–3 missed frames
         self._tracked_objects: dict[str, dict[str, Any]] = {}
         self._frame_count: int = 0
         self.current_ai_source: str = "PRIMARY_AI" if self._yolo is not None else "FALLBACK_AI"
+
+        # Cadence cache
+        self._last_yolo_cached_objs: list[DetectedObject] = []
 
         # Telemetry & debug caching
         self.last_raw_yolo_detections: list[dict] = []
@@ -556,6 +566,37 @@ class ObjectDetector:
             else:
                 grouped.setdefault(c_upper, []).append(det_dict)
 
+        # Section 2 Mandate: Inject geometric ROIs for LOCATION_A and LOCATION_B if not visually detected
+        zones = getattr(self.config, "zones", None) or getattr(getattr(self.config, "detection", None), "zones", {})
+        fh, fw = frame.shape[:2]
+        for z_key in ("LOCATION_A", "LOCATION_B"):
+            if not grouped[z_key] and isinstance(zones, dict) and z_key in zones:
+                z_def = zones[z_key]
+                if hasattr(z_def, "to_pixel_polygon"):
+                    poly = z_def.to_pixel_polygon(fw, fh)
+                    if poly:
+                        pxs = [p[0] for p in poly]
+                        pys = [p[1] for p in poly]
+                        min_x, max_x = min(pxs), max(pxs)
+                        min_y, max_y = min(pys), max(pys)
+                        w_box, h_box = max(1, max_x - min_x), max(1, max_y - min_y)
+                        c_x, c_y = min_x + w_box // 2, min_y + h_box // 2
+                        geo_dict = {
+                            "class": z_key,
+                            "class_name": z_key,
+                            "confidence": 0.99,
+                            "bbox": [min_x, min_y, w_box, h_box],
+                            "bounding_box": [min_x, min_y, max_x, max_y],
+                            "center": [c_x, c_y],
+                            "center_x": c_x,
+                            "center_y": c_y,
+                            "source": "geometric_roi",
+                            "semantic_identity": z_key,
+                            "frame_id": f_id,
+                            "timestamp": timestamp,
+                        }
+                        grouped[z_key].append(geo_dict)
+
         # Also mirror to lowercase aliases so legacy consumers function seamlessly
         for c in REQUIRED_YOLO_CLASSES:
             grouped[c.lower()] = grouped[c]
@@ -577,7 +618,7 @@ class ObjectDetector:
             self.current_ai_source = "UNCERTAIN"
 
         # 7. Apply persistent multi-object tracking
-        tracked = self.tracker.update(smoothed, timestamp)
+        tracked = self.tracker.update(canonical_detections, timestamp)
 
         self.last_tracked_detections = [
             {"class": str(o.class_name), "conf": round(float(o.confidence), 3), "track_id": getattr(o, "track_id", -1), "bbox": list(o.bbox)}
@@ -649,18 +690,65 @@ class ObjectDetector:
         if self._yolo is None:
             return []
 
+        # Latency Optimization: Cadence check (skip frames if configured, reuse cached)
+        interval = getattr(self.config, "yolo_interval", 1)
+        if interval > 1 and (self._frame_count % interval != 1) and len(self._last_yolo_cached_objs) > 0:
+            cached_res = []
+            for obj in self._last_yolo_cached_objs:
+                c_copy = DetectedObject(
+                    class_name=obj.class_name,
+                    confidence=obj.confidence,
+                    bbox=obj.bbox,
+                    centroid=obj.centroid,
+                    timestamp=timestamp,
+                    source="yolo_cached",
+                    raw_label=obj.raw_label,
+                    semantic_identity=obj.semantic_identity,
+                    frame_id=frame_id,
+                )
+                cached_res.append(c_copy)
+            return cached_res
+
         try:
-            # Run inference with the lowest class-specific threshold to capture all relevant objects
+            import torch
+            use_half = (self._device == "cuda") and getattr(self.config, "half_precision", True)
             base_conf = min(self.class_thresholds.values())
-            results = self._yolo.predict(
-                frame,
-                conf=base_conf,
-                device=self._device,
-                imgsz=getattr(self.config, "yolo_imgsz", 640),
-                iou=self.iou_threshold,
-                verbose=False,
-                stream=False,
-            )
+            img_size = getattr(self.config, "yolo_imgsz", 480)
+
+            # Table ROI extraction (Section 3 & 12):
+            # If TABLE_ROI is configured, crop to table ROI for focused high-resolution detection of small objects
+            zones = getattr(self.config, "zones", None) or getattr(getattr(self.config, "detection", None), "zones", {})
+            table_zone = zones.get("TABLE_ROI") if isinstance(zones, dict) else None
+            offset_x, offset_y = 0, 0
+            inference_frame = frame
+            fh, fw = frame.shape[:2]
+
+            if table_zone is not None and hasattr(table_zone, "to_pixel_polygon"):
+                poly = table_zone.to_pixel_polygon(fw, fh)
+                if len(poly) >= 3:
+                    xs = [p[0] for p in poly]
+                    ys = [p[1] for p in poly]
+                    min_x, max_x = max(0, min(xs)), min(fw, max(xs))
+                    min_y, max_y = max(0, min(ys)), min(fh, max(ys))
+                    crop_w, crop_h = max_x - min_x, max_y - min_y
+                    if crop_w > 120 and crop_h > 120 and (crop_w * crop_h >= 0.20 * fw * fh):
+                        inference_frame = frame[min_y:max_y, min_x:max_x]
+                        offset_x, offset_y = min_x, min_y
+
+            with torch.inference_mode():
+                predict_kwargs = {
+                    "conf": base_conf,
+                    "device": self._device,
+                    "imgsz": img_size,
+                    "iou": self.iou_threshold,
+                    "verbose": False,
+                    "stream": False,
+                }
+                if use_half:
+                    predict_kwargs["half"] = True
+
+                results = self._yolo.predict(inference_frame, **predict_kwargs)
+
             objs: list[DetectedObject] = []
             raw_telemetry: list[dict] = []
             mapped_telemetry: list[dict] = []
@@ -674,6 +762,10 @@ class ObjectDetector:
                     raw_name = r.names.get(cls_id, f"CLASS_{cls_id}").strip()
                     conf = float(box.conf[0])
                     x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+                    x1 += offset_x
+                    x2 += offset_x
+                    y1 += offset_y
+                    y2 += offset_y
                     w, h = max(1, x2 - x1), max(1, y2 - y1)
                     cx, cy = x1 + w // 2, y1 + h // 2
 
@@ -732,6 +824,7 @@ class ObjectDetector:
 
             # Apply per-class Non-Maximum Suppression (NMS) immediately after extraction
             objs = apply_class_aware_nms(objs, iou_threshold=self.iou_threshold, min_confidence=base_conf)
+            self._last_yolo_cached_objs = objs
 
             self.last_raw_yolo_detections = raw_telemetry
             self.last_mapped_detections = mapped_telemetry
@@ -843,6 +936,13 @@ class ObjectDetector:
                         mean_b, mean_g, mean_r = cv2.mean(roi)[:3]
                         red_dominance = float(mean_r) - max(float(mean_g), float(mean_b))
                         if red_dominance < 75.0 or mean_r < 160.0:
+                            continue
+
+                if canonical == "YELLOW_BOX":
+                    roi = frame[max(0, y):min(H, y + h), max(0, x):min(W, x + w)]
+                    if roi.size > 0:
+                        mean_b, mean_g, mean_r = cv2.mean(roi)[:3]
+                        if mean_b > 80 or mean_r < 170 or mean_g < 140 or (mean_r - mean_b) < 100:
                             continue
 
                 confidence = float(np.clip(0.60 + 0.22 * rectangularity + 0.15 * solidity, 0.60, 0.95))
@@ -1069,6 +1169,16 @@ class ObjectDetector:
                 self.confidence_threshold,
                 getattr(self.config, "iou_threshold", 0.45),
             )
+
+            # Warm up model: run 1 forward pass to avoid 5-second cold start on first live video frame
+            try:
+                warm_sz = getattr(self.config, "yolo_imgsz", 480)
+                dummy = np.zeros((warm_sz, warm_sz, 3), dtype=np.uint8)
+                with torch.inference_mode():
+                    self._yolo.predict(dummy, device=self._device, imgsz=warm_sz, verbose=False)
+                logger.info("YOLO warmup completed successfully at %dx%d.", warm_sz, warm_sz)
+            except Exception as w_exc:
+                logger.debug("YOLO warmup pass skipped: %s", w_exc)
 
         except ImportError:
             logger.warning("ultralytics not installed — fallback to chroma detection.")

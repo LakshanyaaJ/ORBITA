@@ -1,16 +1,15 @@
 """
-ORBITA 7-Class Dataset Generator (V4)
-=====================================
-Generates high-precision ground-truth dataset for the 7 canonical entities:
-  0: LOCATION_A  (bottom white sheet with 'A' marker)
-  1: LOCATION_B  (top white sheet with 'B' marker)
+ORBITA 7-Class Horizontal Dataset Generator (V4)
+================================================
+Generates high-precision ground-truth dataset in HORIZONTAL orientation (1920x1080 / 640x640)
+for the 7 canonical entities:
+  0: LOCATION_A  (left white sheet with 'A' marker)
+  1: LOCATION_B  (right white sheet with 'B' marker)
   2: PEN         (physical light blue marker/pen)
   3: WATCH       (physical metallic wristwatch)
   4: BLUE_BOX    (3D physical blue container)
   5: YELLOW_BOX  (3D physical yellow container with tabs)
   6: HAND        (human operator hand)
-
-Eliminates false-positive BLUE_BOX labeling on white paper.
 """
 
 from __future__ import annotations
@@ -59,6 +58,110 @@ def clip_box(xc: float, yc: float, w: float, h: float) -> Tuple[float, float, fl
     return round(nxc, 5), round(nyc, 5), round(nw, 5), round(nh, 5)
 
 
+def get_horizontal_boxes_for_frame(fno: int) -> List[Tuple[int, List[float]]]:
+    """
+    Returns normalized [xc, yc, w, h] boxes in HORIZONTAL frame coordinates
+    across the entire 1830-frame experiment timeline.
+    """
+    boxes: List[Tuple[int, List[float]]] = []
+
+    # 1. LOCATION_A and LOCATION_B are stationary on the table throughout
+    boxes.append((CLASS_IDX["LOCATION_A"], [0.268, 0.386, 0.214, 0.556]))
+    boxes.append((CLASS_IDX["LOCATION_B"], [0.730, 0.338, 0.159, 0.477]))
+
+    # 2. BLUE_BOX trajectory
+    # Rest position: bottom right [0.682, 0.729, 0.140, 0.201]
+    # At Location A: [0.310, 0.320, 0.150, 0.210]
+    # At Location B: [0.715, 0.316, 0.130, 0.200]
+    if fno < 320:
+        bx, by, bw, bh = 0.682, 0.729, 0.140, 0.201
+    elif 320 <= fno < 480:
+        t = (fno - 320) / 160.0
+        bx = 0.682 + (0.310 - 0.682) * t
+        by = 0.729 + (0.320 - 0.729) * t
+        bw, bh = 0.150, 0.210
+    elif 480 <= fno < 1550:
+        bx, by, bw, bh = 0.310, 0.320, 0.150, 0.210
+    elif 1550 <= fno < 1680:
+        t = (fno - 1550) / 130.0
+        bx = 0.310 + (0.715 - 0.310) * t
+        by = 0.320 + (0.316 - 0.320) * t
+        bw, bh = 0.140, 0.200
+    else:
+        bx, by, bw, bh = 0.715, 0.316, 0.130, 0.200
+    boxes.append((CLASS_IDX["BLUE_BOX"], [bx, by, bw, bh]))
+
+    # 3. YELLOW_BOX trajectory
+    # Rest position: bottom left [0.406, 0.783, 0.197, 0.268]
+    # At Location B: [0.755, 0.300, 0.170, 0.280]
+    # At Location A: [0.320, 0.355, 0.170, 0.280]
+    if fno < 600:
+        yx, yy, yw, yh = 0.406, 0.783, 0.197, 0.268
+    elif 600 <= fno < 750:
+        t = (fno - 600) / 150.0
+        yx = 0.406 + (0.755 - 0.406) * t
+        yy = 0.783 + (0.300 - 0.783) * t
+        yw, yh = 0.180, 0.270
+    elif 750 <= fno < 1680:
+        yx, yy, yw, yh = 0.755, 0.300, 0.170, 0.280
+    elif 1680 <= fno < 1800:
+        t = (fno - 1680) / 120.0
+        yx = 0.755 + (0.320 - 0.755) * t
+        yy = 0.300 + (0.355 - 0.300) * t
+        yw, yh = 0.170, 0.280
+    else:
+        yx, yy, yw, yh = 0.320, 0.355, 0.170, 0.280
+    boxes.append((CLASS_IDX["YELLOW_BOX"], [yx, yy, yw, yh]))
+
+    # 4. PEN trajectory
+    # Rest position: [0.574, 0.343, 0.020, 0.227]
+    # Picked up & moved to Blue Box: 880 <= fno < 1050
+    # In Blue Box: fno >= 1050 (follows Blue Box)
+    if fno < 880:
+        px, py, pw, ph = 0.574, 0.343, 0.020, 0.227
+    elif 880 <= fno < 1050:
+        t = (fno - 880) / 170.0
+        px = 0.574 + (bx - 0.574) * t
+        py = 0.343 + (by - 0.343) * t
+        pw, ph = 0.040, 0.200
+    else:
+        # Inside Blue Box (slight offset/diagonal)
+        px, py, pw, ph = bx - 0.005, by - 0.010, 0.055, 0.160
+    boxes.append((CLASS_IDX["PEN"], [px, py, pw, ph]))
+
+    # 5. WATCH trajectory
+    # Rest position: [0.507, 0.338, 0.034, 0.204]
+    # Picked up & moved to Yellow Box: 1120 <= fno < 1300
+    # In Yellow Box: fno >= 1300 (follows Yellow Box)
+    if fno < 1120:
+        wx, wy, ww, wh = 0.507, 0.338, 0.034, 0.204
+    elif 1120 <= fno < 1300:
+        t = (fno - 1120) / 180.0
+        wx = 0.507 + (yx - 0.507) * t
+        wy = 0.338 + (yy - 0.338) * t
+        ww, wh = 0.060, 0.170
+    else:
+        # Inside Yellow Box
+        wx, wy, ww, wh = yx + 0.005, yy - 0.005, 0.065, 0.160
+    boxes.append((CLASS_IDX["WATCH"], [wx, wy, ww, wh]))
+
+    # 6. HAND detections during active physical interactions
+    if 300 <= fno < 520:
+        boxes.append((CLASS_IDX["HAND"], [bx + 0.06, by + 0.08, 0.160, 0.220]))
+    elif 600 <= fno < 780:
+        boxes.append((CLASS_IDX["HAND"], [yx + 0.05, yy + 0.08, 0.170, 0.220]))
+    elif 880 <= fno < 1080:
+        boxes.append((CLASS_IDX["HAND"], [px + 0.04, py + 0.08, 0.150, 0.200]))
+    elif 1120 <= fno < 1320:
+        boxes.append((CLASS_IDX["HAND"], [wx + 0.04, wy + 0.08, 0.160, 0.200]))
+    elif 1520 <= fno < 1690:
+        boxes.append((CLASS_IDX["HAND"], [bx + 0.05, by + 0.08, 0.160, 0.220]))
+    elif 1680 <= fno < 1820:
+        boxes.append((CLASS_IDX["HAND"], [yx + 0.05, yy + 0.08, 0.160, 0.220]))
+
+    return boxes
+
+
 def build_dataset():
     v4_base = Path("datasets/orbita/v4")
     images_dir = v4_base / "images"
@@ -72,31 +175,12 @@ def build_dataset():
         (images_dir / split).mkdir(parents=True, exist_ok=True)
         (labels_dir / split).mkdir(parents=True, exist_ok=True)
 
-    # 1. Base ground-truth temporal trajectories for video 20260908_135006.mp4 (1080x1920)
-    # Class coordinates [xc, yc, w, h] normalized:
-    # Top paper: LOCATION_B [0.338, 0.270, 0.477, 0.159]
-    # Bottom paper: LOCATION_A [0.386, 0.732, 0.556, 0.214]
-    # Pen rest: [0.343, 0.426, 0.227, 0.020]
-    # Watch rest: [0.338, 0.493, 0.204, 0.034]
-    # Blue box rest: [0.729, 0.318, 0.201, 0.140]
-    # Yellow box rest: [0.783, 0.594, 0.268, 0.197]
-
     cap = cv2.VideoCapture("vdata/20260908_135006.mp4")
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    logger.info("Extracting ground-truth frames from 20260908_135006.mp4 (%d frames)...", total_frames)
+    logger.info("Extracting ground-truth horizontal frames from base video (%d frames)...", total_frames)
 
-    # Sample key frames evenly across all experiment phases:
-    # Frame intervals:
-    # 0-250: Initial rest
-    # 250-450: Pick up Blue Box
-    # 450-650: Place Blue Box at Location A
-    # 650-850: Pick up Yellow Box, place at Location B
-    # 850-1100: Pick up Pen, place inside Blue Box
-    # 1100-1400: Pick up Watch, place inside Yellow Box
-    # 1400-1650: Move Blue Box to Location B
-    # 1650-1830: Move Yellow Box to Location A
-
-    sampled_frame_indices = list(range(10, total_frames - 10, 15)) # ~120 frames
+    # Sample every 10 frames across all experiment phases (~180 frames)
+    sampled_frame_indices = list(range(10, total_frames - 10, 10))
 
     extracted_data = []
 
@@ -106,196 +190,54 @@ def build_dataset():
         if not ret or frame is None:
             continue
 
-        orig_h, orig_w = frame.shape[:2]
+        # CRITICAL: Rotate frame 90 degrees clockwise to match horizontal stream
+        frame_horiz = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
-        boxes = []
-        # LOCATION_A and LOCATION_B are stationary on desk throughout
-        boxes.append((CLASS_IDX["LOCATION_A"], [0.386, 0.732, 0.556, 0.214]))
-        boxes.append((CLASS_IDX["LOCATION_B"], [0.338, 0.270, 0.477, 0.159]))
-
-        # Dynamic entity positions based on timeline
-        if fno < 350:
-            # All objects in rest positions
-            boxes.append((CLASS_IDX["BLUE_BOX"], [0.729, 0.318, 0.201, 0.140]))
-            boxes.append((CLASS_IDX["YELLOW_BOX"], [0.783, 0.594, 0.268, 0.197]))
-            boxes.append((CLASS_IDX["PEN"], [0.343, 0.426, 0.227, 0.020]))
-            boxes.append((CLASS_IDX["WATCH"], [0.338, 0.493, 0.204, 0.034]))
-            if 200 <= fno < 350:
-                boxes.append((CLASS_IDX["HAND"], [0.820, 0.300, 0.250, 0.180]))
-
-        elif 350 <= fno < 500:
-            # Blue box being lifted and moved towards Location A
-            t = (fno - 350) / 150.0
-            bx = 0.729 + (0.320 - 0.729) * t
-            by = 0.318 + (0.710 - 0.318) * t
-            boxes.append((CLASS_IDX["BLUE_BOX"], [bx, by, 0.215, 0.145]))
-            boxes.append((CLASS_IDX["HAND"], [bx + 0.10, by - 0.04, 0.220, 0.160]))
-            boxes.append((CLASS_IDX["YELLOW_BOX"], [0.783, 0.594, 0.268, 0.197]))
-            boxes.append((CLASS_IDX["PEN"], [0.343, 0.426, 0.227, 0.020]))
-            boxes.append((CLASS_IDX["WATCH"], [0.338, 0.493, 0.204, 0.034]))
-
-        elif 500 <= fno < 700:
-            # Blue box at Location A
-            boxes.append((CLASS_IDX["BLUE_BOX"], [0.320, 0.710, 0.230, 0.130]))
-            boxes.append((CLASS_IDX["PEN"], [0.343, 0.426, 0.227, 0.020]))
-            boxes.append((CLASS_IDX["WATCH"], [0.338, 0.493, 0.204, 0.034]))
-            if fno < 600:
-                boxes.append((CLASS_IDX["YELLOW_BOX"], [0.783, 0.594, 0.268, 0.197]))
-            else:
-                # Yellow box moving to Location B
-                t = (fno - 600) / 100.0
-                yx = 0.783 + (0.285 - 0.783) * t
-                yy = 0.594 + (0.245 - 0.594) * t
-                boxes.append((CLASS_IDX["YELLOW_BOX"], [yx, yy, 0.280, 0.180]))
-                boxes.append((CLASS_IDX["HAND"], [yx + 0.12, yy, 0.230, 0.180]))
-
-        elif 700 <= fno < 950:
-            # Blue Box at Location A, Yellow Box at Location B
-            boxes.append((CLASS_IDX["BLUE_BOX"], [0.320, 0.710, 0.230, 0.130]))
-            boxes.append((CLASS_IDX["YELLOW_BOX"], [0.285, 0.245, 0.290, 0.160]))
-            boxes.append((CLASS_IDX["WATCH"], [0.338, 0.493, 0.204, 0.034]))
-            if fno < 800:
-                boxes.append((CLASS_IDX["PEN"], [0.343, 0.426, 0.227, 0.020]))
-            else:
-                # Pen being moved to Blue Box
-                boxes.append((CLASS_IDX["PEN"], [0.315, 0.690, 0.210, 0.035]))
-                boxes.append((CLASS_IDX["HAND"], [0.380, 0.650, 0.220, 0.180]))
-
-        elif 950 <= fno < 1350:
-            # Pen inside Blue Box (at Location A)
-            boxes.append((CLASS_IDX["BLUE_BOX"], [0.320, 0.710, 0.230, 0.130]))
-            boxes.append((CLASS_IDX["PEN"], [0.315, 0.690, 0.210, 0.035]))
-            boxes.append((CLASS_IDX["YELLOW_BOX"], [0.285, 0.245, 0.290, 0.160]))
-            if fno < 1150:
-                boxes.append((CLASS_IDX["WATCH"], [0.338, 0.493, 0.204, 0.034]))
-            else:
-                # Watch moving into Yellow Box
-                boxes.append((CLASS_IDX["WATCH"], [0.280, 0.240, 0.170, 0.060]))
-                boxes.append((CLASS_IDX["HAND"], [0.330, 0.250, 0.220, 0.180]))
-
-        elif 1350 <= fno < 1600:
-            # Pen inside Blue Box, Watch inside Yellow Box
-            # Blue Box moving from Location A to Location B
-            boxes.append((CLASS_IDX["YELLOW_BOX"], [0.285, 0.245, 0.290, 0.160]))
-            boxes.append((CLASS_IDX["WATCH"], [0.280, 0.240, 0.170, 0.060]))
-            t = (fno - 1350) / 250.0
-            bx = 0.320 + (0.316 - 0.320) * t
-            by = 0.710 + (0.285 - 0.710) * t
-            boxes.append((CLASS_IDX["BLUE_BOX"], [bx, by, 0.230, 0.130]))
-            boxes.append((CLASS_IDX["PEN"], [bx, by, 0.210, 0.035]))
-            boxes.append((CLASS_IDX["HAND"], [bx + 0.08, by, 0.220, 0.180]))
-
-        else:
-            # Final state: Blue Box at Location B, Yellow Box moved to Location A
-            boxes.append((CLASS_IDX["BLUE_BOX"], [0.316, 0.285, 0.230, 0.130]))
-            boxes.append((CLASS_IDX["PEN"], [0.316, 0.285, 0.210, 0.035]))
-            boxes.append((CLASS_IDX["YELLOW_BOX"], [0.330, 0.680, 0.340, 0.160]))
-            boxes.append((CLASS_IDX["WATCH"], [0.330, 0.680, 0.170, 0.060]))
-            if fno > 1700:
-                boxes.append((CLASS_IDX["HAND"], [0.420, 0.680, 0.220, 0.180]))
-
-        extracted_data.append((fno, frame, boxes))
+        boxes = get_horizontal_boxes_for_frame(fno)
+        extracted_data.append((fno, frame_horiz, boxes))
 
     cap.release()
-    logger.info("Extracted %d ground-truth frames from base video.", len(extracted_data))
-
-    # Also load isolated object crops for high-diversity synthetic compositing
-    crop_blue = cv2.imread("crop_test_BLUE_BOX.jpg")
-    crop_yellow = cv2.imread("crop_test_YELLOW_BOX.jpg")
-    crop_pen = cv2.imread("crop_exact_pen.jpg")
-    crop_watch = cv2.imread("crop_exact_watch.jpg")
-    crop_loc_a = cv2.imread("crop_test_LOCATION_B.jpg") # Bottom sheet ('A')
-    crop_loc_b = cv2.imread("crop_test_LOCATION_A.jpg") # Top sheet ('B')
-    desk_bg = cv2.imread("20260908_135006_f60.jpg")
+    logger.info("Extracted %d horizontal ground-truth frames from base video.", len(extracted_data))
 
     all_frames: List[Tuple[str, np.ndarray, List[Tuple[int, List[float]]]]] = []
 
-    # Add real extracted frames
+    # Add real horizontal frames
     for fno, raw_img, bxs in extracted_data:
-        # Resize to standardized TARGET_W x TARGET_H
         resized = cv2.resize(raw_img, (TARGET_W, TARGET_H))
         all_frames.append((f"vid_real_f{fno:05d}", resized, bxs))
 
-    # 2. Add realistic variations and photometric augmentations
+    # Add photometric & geometric augmentations
     random.seed(42)
     np.random.seed(42)
 
-    for i in range(120):
-        # Pick a random base frame
+    for i in range(160):
         fno, base_img, base_bxs = random.choice(extracted_data)
 
         # Photometric shifts
-        alpha = random.uniform(0.80, 1.25) # contrast
-        beta = random.uniform(-25, 25)     # brightness
+        alpha = random.uniform(0.85, 1.20)
+        beta = random.uniform(-20, 20)
         aug_img = cv2.convertScaleAbs(base_img, alpha=alpha, beta=beta)
 
-        # Slight hue / saturation jitter
+        # Hue/saturation jitter
         if random.random() > 0.3:
             hsv = cv2.cvtColor(aug_img, cv2.COLOR_BGR2HSV).astype(np.float32)
-            hsv[:, :, 0] = (hsv[:, :, 0] + random.uniform(-6, 6)) % 180
-            hsv[:, :, 1] = np.clip(hsv[:, :, 1] * random.uniform(0.85, 1.15), 0, 255)
+            hsv[:, :, 0] = (hsv[:, :, 0] + random.uniform(-5, 5)) % 180
+            hsv[:, :, 1] = np.clip(hsv[:, :, 1] * random.uniform(0.88, 1.12), 0, 255)
             aug_img = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
 
         resized = cv2.resize(aug_img, (TARGET_W, TARGET_H))
 
-        # Add small jitter to bounding box coordinates (+- 1%)
+        # Small coordinate jitter (+- 0.5%)
         jittered_bxs = []
         for cid, (xc, yc, w, h) in base_bxs:
-            j_xc = np.clip(xc + random.uniform(-0.008, 0.008), 0.02, 0.98)
-            j_yc = np.clip(yc + random.uniform(-0.008, 0.008), 0.02, 0.98)
-            j_w = np.clip(w * random.uniform(0.96, 1.04), 0.01, 0.95)
-            j_h = np.clip(h * random.uniform(0.96, 1.04), 0.01, 0.95)
+            j_xc = np.clip(xc + random.uniform(-0.005, 0.005), 0.02, 0.98)
+            j_yc = np.clip(yc + random.uniform(-0.005, 0.005), 0.02, 0.98)
+            j_w = np.clip(w * random.uniform(0.97, 1.03), 0.01, 0.95)
+            j_h = np.clip(h * random.uniform(0.97, 1.03), 0.01, 0.95)
             c_box = clip_box(j_xc, j_yc, j_w, j_h)
             jittered_bxs.append((cid, list(c_box)))
 
         all_frames.append((f"vid_aug_s{i:04d}", resized, jittered_bxs))
-
-    # 3. Add synthetic compositions on wood table background
-    if desk_bg is not None and crop_blue is not None and crop_yellow is not None:
-        table_h, table_w = desk_bg.shape[:2]
-        for s_idx in range(80):
-            canvas = desk_bg.copy()
-            # Random brightness/contrast
-            alpha = random.uniform(0.85, 1.15)
-            beta = random.uniform(-15, 15)
-            canvas = cv2.convertScaleAbs(canvas, alpha=alpha, beta=beta)
-
-            synth_bxs = []
-            # Place Location A and Location B
-            # Always have Location A and Location B
-            synth_bxs.append((CLASS_IDX["LOCATION_A"], [0.386, 0.732, 0.556, 0.214]))
-            synth_bxs.append((CLASS_IDX["LOCATION_B"], [0.338, 0.270, 0.477, 0.159]))
-
-            # Paste Blue Box at random desk position
-            bx_pos = random.choice([
-                (0.729, 0.318), # rest
-                (0.320, 0.710), # at Location A
-                (0.316, 0.285), # at Location B
-                (0.680, 0.450), # transition
-            ])
-            # Paste Yellow Box at random desk position
-            yx_pos = random.choice([
-                (0.783, 0.594), # rest
-                (0.285, 0.245), # at Location B
-                (0.330, 0.680), # at Location A
-                (0.620, 0.620), # transition
-            ])
-
-            synth_bxs.append((CLASS_IDX["BLUE_BOX"], [bx_pos[0], bx_pos[1], 0.201, 0.140]))
-            synth_bxs.append((CLASS_IDX["YELLOW_BOX"], [yx_pos[0], yx_pos[1], 0.268, 0.197]))
-
-            # Pen and Watch
-            synth_bxs.append((CLASS_IDX["PEN"], [0.343, 0.426, 0.227, 0.020]))
-            synth_bxs.append((CLASS_IDX["WATCH"], [0.338, 0.493, 0.204, 0.034]))
-
-            # Hand
-            if random.random() > 0.4:
-                hx = random.uniform(0.30, 0.75)
-                hy = random.uniform(0.30, 0.70)
-                synth_bxs.append((CLASS_IDX["HAND"], [hx, hy, 0.220, 0.180]))
-
-            resized_canvas = cv2.resize(canvas, (TARGET_W, TARGET_H))
-            all_frames.append((f"synth_comp_s{s_idx:04d}", resized_canvas, synth_bxs))
 
     # Shuffle and split: 70% train, 20% val, 10% test
     random.shuffle(all_frames)
@@ -303,14 +245,10 @@ def build_dataset():
     n_train = int(n_total * 0.70)
     n_val = int(n_total * 0.20)
 
-    train_data = all_frames[:n_train]
-    val_data = all_frames[n_train:n_train + n_val]
-    test_data = all_frames[n_train + n_val:]
-
     splits = {
-        "train": train_data,
-        "val": val_data,
-        "test": test_data,
+        "train": all_frames[:n_train],
+        "val": all_frames[n_train:n_train + n_val],
+        "test": all_frames[n_train + n_val:],
     }
 
     counts = {s: 0 for s in splits}
@@ -330,12 +268,12 @@ def build_dataset():
 
             counts[split_name] += 1
 
-    logger.info("Dataset V4 built successfully:")
+    logger.info("Horizontal Dataset V4 built successfully:")
     logger.info("  Splits: Train=%d, Val=%d, Test=%d | Total=%d", counts["train"], counts["val"], counts["test"], n_total)
     logger.info("  Class instance counts: %s", cls_counts)
 
     # Write data.yaml
-    data_yaml_content = f"""# ORBITA 7-Class Dataset (V4)
+    data_yaml_content = f"""# ORBITA 7-Class Horizontal Dataset (V4)
 path: {v4_base.resolve().as_posix()}
 train: images/train
 val: images/val
@@ -355,7 +293,6 @@ nc: 7
     with open(v4_base / "data.yaml", "w", encoding="utf-8") as f:
         f.write(data_yaml_content)
 
-    # Also update datasets/orbita/data.yaml
     with open("datasets/orbita/data.yaml", "w", encoding="utf-8") as f:
         f.write(data_yaml_content)
 

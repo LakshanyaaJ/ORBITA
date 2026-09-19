@@ -132,10 +132,12 @@ class MultiObjectTracker:
         max_age: int = 15,
         min_hits: int = 1,
         iou_threshold: float = 0.25,
+        object_lost_frames: int = 3,
     ):
         self.max_age = max_age
         self.min_hits = min_hits
         self.iou_threshold = iou_threshold
+        self.object_lost_frames = object_lost_frames
         self._next_id: int = 1
         self._tracks: Dict[int, TrackedState] = {}
         self._primary_operator_id: Optional[int] = None
@@ -334,6 +336,32 @@ class MultiObjectTracker:
             if tid > 0 and tid in self._tracks and tid not in seen_track_ids:
                 seen_track_ids.add(tid)
                 canonical_detections.append(det)
+
+        # Temporal Persistence (Section 7 & 8):
+        # If an established track disappears for <= object_lost_frames, synthesize a persistent detection
+        try:
+            from core_ai.perception.object_detector import DetectedObject, NormalizedClassName
+            for tid, track in self._tracks.items():
+                if tid not in seen_track_ids and 1 <= track.time_since_update <= self.object_lost_frames and track.hits >= self.min_hits:
+                    # Decay confidence slightly over missed frames
+                    decay = max(0.40, 1.0 - (track.time_since_update * 0.07))
+                    persisted_conf = float(track.confidence * decay)
+                    persisted_det = DetectedObject(
+                        class_name=NormalizedClassName(track.class_name),
+                        confidence=persisted_conf,
+                        bbox=track.bbox,
+                        centroid=track.centroid,
+                        timestamp=timestamp,
+                        source="tracker_persistence",
+                        raw_label=track.raw_label or track.class_name.lower(),
+                        semantic_identity=track.semantic_identity or track.class_name.upper(),
+                        track_id=track.track_id,
+                        velocity=track.velocity,
+                    )
+                    seen_track_ids.add(tid)
+                    canonical_detections.append(persisted_det)
+        except Exception as err:
+            logger.debug("Tracker persistence synthesis notice: %s", err)
 
         return canonical_detections
 

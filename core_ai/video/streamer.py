@@ -80,6 +80,10 @@ class MJPEGStreamer:
         if frame is None or frame.size == 0:
             return
 
+        # Failsafe guarantee: every video stream must play horizontally
+        if frame.shape[0] > frame.shape[1]:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
         t0 = time.monotonic()
 
         # Fast JPEG encoding: OPTIMIZE=0 disables multi-pass Huffman for minimum CPU overhead

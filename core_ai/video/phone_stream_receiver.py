@@ -229,12 +229,19 @@ class PhoneStreamReceiver:
         # Apply orientation transformation: guarantee horizontal landscape view
         fh, fw = frame.shape[:2]
         rot = getattr(self, "rotation", -1)
-        if rot == 90 or (rot == -1 and fh > fw):
+        if rot == 90:
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
         elif rot == 180:
             frame = cv2.rotate(frame, cv2.ROTATE_180)
         elif rot == 270:
             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        elif (rot in (-1, 0) or rot is None) and fh > fw:
+            # Auto-horizontal: rotate portrait video to landscape
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
+        # Failsafe guarantee: every video should play horizontally
+        if frame.shape[0] > frame.shape[1]:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
         with self._lock:
             self._connected = True

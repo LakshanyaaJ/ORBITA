@@ -50,7 +50,7 @@ class InteractionState(IntEnum):
 
 
 CONTAINER_CLASSES = {"MAIN_BOX", "RED_BOX", "YELLOW_BOX", "BLUE_BOX"}
-MANIPULABLE_CLASSES = {"SAMPLE", "TOOL"}
+MANIPULABLE_CLASSES = {"SAMPLE", "TOOL", "PEN", "WATCH", "BLUE_BOX", "YELLOW_BOX"}
 
 
 @dataclass
@@ -142,7 +142,7 @@ class HandObjectInteractionTracker:
     fingertip proximity, bounding box overlap, velocity coupling, and temporal persistence.
     """
 
-    def __init__(self, config: Any):
+    def __init__(self, config: Any = None):
         self.config = config
         self.contact_distance = getattr(config, "contact_distance_px", 60)
         self.grasp_frames = getattr(config, "grasp_frames_required", 4)
@@ -219,6 +219,9 @@ class HandObjectInteractionTracker:
         self._states.clear()
         self._object_containers.clear()
 
+    # Alias for backwards compatibility
+    evaluate = update
+
     # ----------------------------------------------------------------------- #
     # Live Overlay Drawing for Interactions
     # ----------------------------------------------------------------------- #
@@ -267,18 +270,21 @@ class HandObjectInteractionTracker:
             cv2.line(vis, p1, p2, (20, 25, 35), 3, cv2.LINE_AA)
             cv2.line(vis, p1, p2, colour, 2, cv2.LINE_AA)
 
-            # Midpoint interaction state badge
-            mid_x = (p1[0] + p2[0]) // 2
-            mid_y = (p1[1] + p2[1]) // 2
+            # Midpoint interaction state badge (translucent overlay so objects beneath are 100% visible)
+            bx1 = mid_x - 6
+            by1 = mid_y - 14
+            bx2 = mid_x + len(badge) * 7 + 10
+            by2 = mid_y + 8
 
-            state_name = interaction.state.name
-            badge = f"{state_name} ({int(interaction.distance_px)}px | {int(interaction.confidence * 100)}%)"
-            if interaction.transfer_event:
-                badge = f"{badge} -> {interaction.transfer_event}"
-
-            cv2.rectangle(vis, (mid_x - 6, mid_y - 14), (mid_x + len(badge) * 7 + 10, mid_y + 8), (15, 20, 30), -1)
-            cv2.rectangle(vis, (mid_x - 6, mid_y - 14), (mid_x + len(badge) * 7 + 10, mid_y + 8), colour, 1)
-            cv2.putText(vis, badge, (mid_x, mid_y + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.40, colour, 1, cv2.LINE_AA)
+            h_f, w_f = vis.shape[:2]
+            bx1, by1 = max(0, bx1), max(0, by1)
+            bx2, by2 = min(w_f, bx2), min(h_f, by2)
+            if bx2 > bx1 and by2 > by1:
+                sub_img = vis[by1:by2, bx1:bx2]
+                rect_bg = np.full_like(sub_img, (15, 20, 30), dtype=np.uint8)
+                vis[by1:by2, bx1:bx2] = cv2.addWeighted(rect_bg, 0.35, sub_img, 0.65, 0)
+                cv2.rectangle(vis, (bx1, by1), (bx2, by2), colour, 1)
+            cv2.putText(vis, badge, (mid_x, mid_y + 2), cv2.FONT_HERSHEY_SIMPLEX, 0.38, colour, 1, cv2.LINE_AA)
 
         return vis
 
@@ -422,17 +428,18 @@ class HandObjectInteractionTracker:
 
         elif s.state == InteractionState.HOLDING:
             s.holding_frame_count += 1
-            # Still holding if distance remains small AND (either moving together or both stationary)
-            if effective_dist <= contact_thresh * 1.4:
+            # Hysteresis on HOLDING (Section 9):
+            # Still holding if distance remains close AND (fingertip contact or reasonable proximity)
+            if (is_fingertip_contact or hand_obj_iou > 0.15) and effective_dist <= contact_thresh * 1.5:
+                s.release_frame_count = 0
                 # Check for container entrance during hold
                 current_container = self._object_containers.get(obj.class_name)
-                # maintain holding
-                pass
             else:
-                # Separation: hand moves away
-                s.state = InteractionState.RELEASING
-                s.duration = 0
-                s.release_frame_count = 1
+                s.release_frame_count += 1
+                # Transition to RELEASING if clearly separated or held separate for release_frames
+                if effective_dist > contact_thresh * 1.8 or s.release_frame_count >= self.release_frames:
+                    s.state = InteractionState.RELEASING
+                    s.duration = 0
 
         elif s.state == InteractionState.RELEASING:
             s.release_frame_count += 1
@@ -519,3 +526,6 @@ class HandObjectInteractionTracker:
             contact_duration=s.contact_frame_count,
         )
 
+
+# Canonical alias for backwards compatibility and readability
+HandObjectInteractionManager = HandObjectInteractionTracker

@@ -200,6 +200,16 @@ class AppState:
         self.pipeline_fps: float = 0.0  # Stream FPS
         self.ai_fps: float = 0.0        # AI Inference FPS
         self.total_pipeline_latency_ms: float = 0.0
+        self.stage_latencies: dict[str, float] = {
+            "capture_ms": 0.0,
+            "pose_ms": 0.0,
+            "hand_ms": 0.0,
+            "yolo_ms": 0.0,
+            "hmr_ms": 0.0,
+            "har_ms": 0.0,
+            "fsm_ms": 0.0,
+            "total_ms": 0.0,
+        }
         self.last_result: Optional[ValidationResult] = None
         self.frame_count: int = 0
         self._fps_timer: float = time.monotonic()
@@ -471,6 +481,12 @@ def _execute_ai_cycle() -> None:
     frame_idx = 0
     total_frames = 0
     video_time_str = "00:00.00"
+    t_pose_ms = 0.0
+    t_hand_ms = 0.0
+    t_yolo_ms = 0.0
+    t_inter_ms = 0.0
+    t_har_ms = 0.0
+    t_fsm_ms = 0.0
 
     if active_source == "sim" and _state.simulator:
         sim_frame = _state.simulator.next_frame()
@@ -573,13 +589,29 @@ def _execute_ai_cycle() -> None:
             video_time_str = "00:00.00"
 
         # Perception: run pose & hand tracking first so detector has hand context (under lock)
+        t_pose_ms = 0.0
+        t_hand_ms = 0.0
+        t_yolo_ms = 0.0
+        t_inter_ms = 0.0
         with _inference_lock:
+            _s_pose = time.perf_counter()
             poses = _state.pose.estimate(frame, t_stamp) if _state.pose else []
+            t_pose_ms = (time.perf_counter() - _s_pose) * 1000.0
+
             pose = poses[0] if poses else None
             person_bbox = pose.bbox if pose else None
+
+            _s_hand = time.perf_counter()
             left, right = _state.hand_tracker.track(pose, frame, t_stamp, person_bbox=person_bbox) if _state.hand_tracker else (None, None)
+            t_hand_ms = (time.perf_counter() - _s_hand) * 1000.0
+
+            _s_yolo = time.perf_counter()
             objects = _state.detector.detect(frame, t_stamp, hands=(left, right), frame_id=frame_idx) if _state.detector else []
+            t_yolo_ms = (time.perf_counter() - _s_yolo) * 1000.0
+
+            _s_inter = time.perf_counter()
             interactions = _state.interaction_tracker.update(left, right, objects, t_stamp) if _state.interaction_tracker else []
+            t_inter_ms = (time.perf_counter() - _s_inter) * 1000.0
 
         # Update physical track states with hand interactions
         tracks = []
@@ -595,9 +627,11 @@ def _execute_ai_cycle() -> None:
         else:
             window = np.zeros((30, 64), dtype=np.float32)
 
+        _s_har = time.perf_counter()
         prediction = _state.classifier.predict(window) if _state.classifier else ActionPrediction(
             action="IDLE", confidence=0.5, next_action="IDLE", next_confidence=0.3, is_uncertain=False, target_object=""
         )
+        t_har_ms = (time.perf_counter() - _s_har) * 1000.0
         obj = ""
 
     else:
@@ -605,8 +639,10 @@ def _execute_ai_cycle() -> None:
 
     # Reasoning / State Manager
     result = None
+    t_fsm_ms = 0.0
     if _state.state_manager:
         ai_calc_time = (time.time() - t0) * 1000.0
+        _s_fsm = time.perf_counter()
         result = _state.state_manager.process(
             prediction=prediction,
             detected_objects=objects,
@@ -626,6 +662,7 @@ def _execute_ai_cycle() -> None:
             nms_detections=getattr(_state.detector, "last_nms_detections", []) if _state.detector else [],
             grouped_detections=_state.detector.get_grouped_detections() if _state.detector else {},
         )
+        t_fsm_ms = (time.perf_counter() - _s_fsm) * 1000.0
         _state.last_result = result
 
         if _state.experiment_logger:
@@ -664,6 +701,16 @@ def _execute_ai_cycle() -> None:
                     logger.warning("Auto result generation error: %s", _res_exc)
 
     ai_duration_ms = (time.time() - t0) * 1000.0
+    _state.stage_latencies = {
+        "capture_ms": round(latency_ms, 1),
+        "pose_ms": round(t_pose_ms, 1),
+        "hand_ms": round(t_hand_ms, 1),
+        "yolo_ms": round(t_yolo_ms, 1),
+        "hmr_ms": round(getattr(getattr(poses[0] if poses else None, "hmr_mesh", None), "inference_time_ms", 0.5) if poses else 0.0, 1),
+        "har_ms": round(t_har_ms, 1),
+        "fsm_ms": round(t_fsm_ms, 1),
+        "total_ms": round(ai_duration_ms + latency_ms, 1),
+    }
 
     # Extract latest HMR and activity info
     hmr_dict = None
@@ -752,6 +799,8 @@ def _execute_ai_cycle() -> None:
             ws_payload["human_activity"] = _state.last_activity
             ws_payload["ground_link"] = "ONLINE" if _state.sync_manager.ground_link_online else "OFFLINE"
             ws_payload["pending_sync"] = _state.sync_manager.get_pending_count()
+            ws_payload["pipeline_stages"] = _state.stage_latencies
+            ws_payload["performance_mode"] = getattr(_state.config, "performance_mode", "BALANCED") if _state.config else "BALANCED"
 
             asyncio.run_coroutine_threadsafe(
                 _state.ws_manager.broadcast(ws_payload),
@@ -920,34 +969,7 @@ def _annotate_frame(
         except Exception:
             pass
 
-    # 4. Hand System Engineering Telemetry Card (Top Right)
-    if (left_hand and left_hand.is_visible) or (right_hand and right_hand.is_visible):
-        ew, eh = 270, 95
-        ex = max(10, vis.shape[1] - ew - 10)
-        ey = 38
-        cv2.rectangle(vis, (ex, ey), (ex + ew, ey + eh), (12, 16, 26), -1)
-        cv2.rectangle(vis, (ex, ey), (ex + ew, ey + eh), (0, 200, 255), 1)
-
-        lh_stat = f"L-Hand #{left_hand.hand_id if left_hand else 1}: {int(left_hand.confidence*100) if (left_hand and left_hand.is_visible) else 0}% ({left_hand.track_status if left_hand else 'LOST'})"
-        rh_stat = f"R-Hand #{right_hand.hand_id if right_hand else 2}: {int(right_hand.confidence*100) if (right_hand and right_hand.is_visible) else 0}% ({right_hand.track_status if right_hand else 'LOST'})"
-
-        primary_int = None
-        if interactions:
-            cand = sorted(interactions, key=lambda x: (getattr(x, "state", 0), getattr(x, "confidence", 0)), reverse=True)
-            if cand:
-                primary_int = cand[0]
-
-        int_line = f"Interaction: {primary_int.hand_side[0].upper()} -> {primary_int.object_class} ({primary_int.state.name})" if primary_int else "Interaction: None"
-        spd_val = max(left_hand.speed if (left_hand and left_hand.is_visible) else 0.0, right_hand.speed if (right_hand and right_hand.is_visible) else 0.0)
-        bot_line = f"Speed: {int(spd_val)} px/s | Landmarks: 21/21"
-
-        cv2.putText(vis, "HAND TELEMETRY", (ex + 8, ey + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 220, 255), 1, cv2.LINE_AA)
-        cv2.putText(vis, lh_stat, (ex + 8, ey + 33), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (220, 220, 220), 1, cv2.LINE_AA)
-        cv2.putText(vis, rh_stat, (ex + 8, ey + 49), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (220, 220, 220), 1, cv2.LINE_AA)
-        cv2.putText(vis, int_line, (ex + 8, ey + 67), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (0, 255, 120), 1, cv2.LINE_AA)
-        cv2.putText(vis, bot_line, (ex + 8, ey + 84), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (170, 170, 170), 1, cv2.LINE_AA)
-
-    # 4. Status banner
+    # 4. Status banner (clean text with stroke outline - zero blocking boxes)
     status_colors = {
         "success": (0, 200, 80),
         "error": (0, 60, 220),
@@ -957,25 +979,24 @@ def _annotate_frame(
     if result:
         alert_level = result.alert_level
         colour = status_colors.get(alert_level, (180, 180, 180))
-        cv2.rectangle(vis, (0, 0), (vis.shape[1], 32), (10, 15, 25), -1)
-        hud_txt = result.hud_message[:55]
-        cv2.putText(vis, hud_txt, (10, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.52, colour, 1, cv2.LINE_AA)
+        hud_txt = result.hud_message[:60]
+        # Text with black outline for crystal clarity without any obscuring box
+        cv2.putText(vis, hud_txt, (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(vis, hud_txt, (10, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.44, colour, 1, cv2.LINE_AA)
 
         # FPS & latency readout
         fps_text = f"{_state.pipeline_fps:.0f} FPS | AI {_state.ai_fps:.0f}"
         if latency_ms > 0:
             fps_text = f"{latency_ms:.0f}ms | {fps_text}"
-        cv2.putText(vis, fps_text, (vis.shape[1] - 170, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, (100, 220, 140), 1, cv2.LINE_AA)
+        cv2.putText(vis, fps_text, (vis.shape[1] - 170, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(vis, fps_text, (vis.shape[1] - 170, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (100, 220, 140), 1, cv2.LINE_AA)
 
-    # 5. Bottom camera badge
+    # 5. Bottom camera badge (clean text with stroke outline - zero blocking boxes)
     if camera_name:
         h, w = vis.shape[:2]
         badge_text = f"SOURCE: {camera_name} · ZERO-LAG"
-        cv2.rectangle(vis, (0, h - 22), (w, h), (10, 15, 25), -1)
-        cv2.putText(vis, badge_text, (10, h - 7),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, (90, 180, 230), 1, cv2.LINE_AA)
+        cv2.putText(vis, badge_text, (10, h - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(vis, badge_text, (10, h - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (90, 180, 230), 1, cv2.LINE_AA)
 
     return vis
 
@@ -1312,9 +1333,11 @@ async def camera_connect(body: dict):
     elif source == "video_file":
         video_path = body.get("path") or body.get("url") or "vdata/20260905_145858.mp4"
         loop = bool(body.get("loop", True))
+        rot = int(body.get("rotation", -1))
         success, err = _state.camera_manager.connect_video_file(video_path, loop=loop)
         if not success:
             return JSONResponse(status_code=400, content={"status": "error", "error": err})
+        _state.camera_manager.set_rotation(rot)
         _state.mode = "video_file"
         # Track for auto-reconnect
         _state.last_video_path = video_path
@@ -1431,6 +1454,8 @@ async def camera_diagnostics():
         "cpu_pct": cpu,
         "mem_pct": mem,
         "video_path": _state.last_video_path if _state.mode == "video_file" else "",
+        "pipeline_stages": _state.stage_latencies,
+        "performance_mode": getattr(_state.config, "performance_mode", "BALANCED") if _state.config else "BALANCED",
     }
 
 
@@ -1469,6 +1494,8 @@ async def api_status():
         "frame_age_ms": round(frame_age, 1),
         "live_edge": cam_diag.get("live_edge", live_edge),
         "pipeline_latency_ms": round(_state.total_pipeline_latency_ms, 1),
+        "pipeline_stages": _state.stage_latencies,
+        "performance_mode": getattr(_state.config, "performance_mode", "BALANCED") if _state.config else "BALANCED",
         "dropped_frames_pct": cam_diag.get("dropped_pct", 0.0),
         "tts": "ONLINE" if (_state.tts and _state.tts.is_available()) else "OFFLINE",
         "recording": "ON" if (_state.recorder and _state.recorder.is_recording()) else "OFF",
@@ -1483,6 +1510,48 @@ async def api_status():
         "mem_pct": mem,
         "ws_clients": _state.ws_manager.client_count,
     }
+
+
+# Performance Mode Control
+@app.get("/api/performance/mode")
+async def get_performance_mode():
+    cfg = _state.config
+    current_mode = getattr(cfg, "performance_mode", "BALANCED") if cfg else "BALANCED"
+    yolo_interval = getattr(cfg, "yolo_interval", 2) if cfg else 2
+    hmr_interval = getattr(cfg.pose, "hmr_interval", 3) if (cfg and hasattr(cfg, "pose")) else 3
+    imgsz = getattr(cfg, "yolo_imgsz", 480) if cfg else 480
+    return {
+        "mode": current_mode,
+        "yolo_interval": yolo_interval,
+        "hmr_interval": hmr_interval,
+        "imgsz": imgsz,
+        "ai_fps": round(_state.ai_fps, 1),
+        "stream_fps": round(_state.pipeline_fps, 1),
+        "stages": _state.stage_latencies,
+    }
+
+
+@app.post("/api/performance/mode")
+async def set_performance_mode(body: dict):
+    new_mode = str(body.get("mode", "BALANCED")).upper()
+    if _state.config and hasattr(_state.config, "set_performance_mode"):
+        _state.config.set_performance_mode(new_mode)
+        if _state.detector:
+            _state.detector.config.yolo_interval = _state.config.yolo_interval
+            _state.detector.config.yolo_imgsz = _state.config.yolo_imgsz
+        if _state.pose:
+            _state.pose.cadence = _state.config.pose.cadence
+            _state.pose.imgsz = _state.config.pose.imgsz
+            if hasattr(_state.pose.config, "hmr_interval"):
+                _state.pose.config.hmr_interval = _state.config.pose.hmr_interval
+        return {
+            "status": "success",
+            "mode": new_mode,
+            "yolo_interval": _state.config.yolo_interval,
+            "hmr_interval": getattr(_state.config.pose, "hmr_interval", 3),
+            "imgsz": _state.config.yolo_imgsz,
+        }
+    return JSONResponse(status_code=400, content={"status": "error", "error": f"Invalid mode: {new_mode}"})
 
 
 # Voice Controls & Status

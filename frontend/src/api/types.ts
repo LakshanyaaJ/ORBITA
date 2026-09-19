@@ -114,4 +114,15 @@ export interface ValidationResult extends FSMState {
   step_confidence?: number;
   debug_telemetry?: DebugTelemetry;
   validation_debug?: any;
+  pipeline_stages?: {
+    capture_ms?: number;
+    pose_ms?: number;
+    hand_ms?: number;
+    yolo_ms?: number;
+    hmr_ms?: number;
+    har_ms?: number;
+    fsm_ms?: number;
+    total_ms?: number;
+  };
+  performance_mode?: 'QUALITY' | 'BALANCED' | 'LOW_LATENCY';
 }

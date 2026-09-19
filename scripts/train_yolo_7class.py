@@ -56,17 +56,18 @@ def train_7class_model():
 
     train_args = dict(
         data=str(data_yaml),
-        epochs=10,
+        epochs=12,
         batch=8,
         imgsz=640,
         device="cpu",
-        degrees=5.0,
-        translate=0.08,
-        scale=0.10,
-        fliplr=0.0,    # Don't flip horizontally to keep Location A/B semantics aligned
+        degrees=4.0,
+        translate=0.06,
+        scale=0.08,
+        fliplr=0.0,    # Strictly keep 0 so LOCATION_A (left) and LOCATION_B (right) stay correct
+        flipud=0.0,
         hsv_h=0.015,
-        hsv_s=0.3,
-        hsv_v=0.3,
+        hsv_s=0.25,
+        hsv_v=0.25,
         plots=False,
         save=True,
         val=True,
@@ -85,6 +86,13 @@ def train_7class_model():
     dest_weights = Path("models/orbita_yolo_detector_v4.pt")
     shutil.copy2(best_weights, dest_weights)
     logger.info("Exported best weights to %s", dest_weights)
+
+    # Also back up to versions directory
+    v4_dir = Path("models/versions/orbita_yolo_detector_v4")
+    v4_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(best_weights, v4_dir / "orbita_yolo_detector_v4.pt")
+    shutil.copy2(best_weights, v4_dir / "orbita_yolo_detector_v3.pt")
+    logger.info("Backed up weights to %s", v4_dir)
 
     # Evaluate on validation split
     eval_model = YOLO(str(dest_weights))
@@ -107,6 +115,25 @@ def train_7class_model():
         try:
             with open(reg_path, "r", encoding="utf-8") as f:
                 registry = json.load(f)
+
+            # Ensure orbita_yolo_detector_v4 is production and has correct weights and classes
+            registry["orbita_yolo_detector_v4"] = {
+                "version": "orbita_yolo_detector_v4",
+                "model_type": "yolo_detector",
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+                "weights_path": str(dest_weights.resolve()),
+                "dataset_version": "v4",
+                "training_samples_count": 341,
+                "classes": [eval_model.names[i] for i in range(len(eval_model.names))],
+                "is_production": True,
+                "metrics": {
+                    "mAP50": mAP50,
+                    "precision": prec,
+                    "recall": rec
+                },
+                "promotion_notes": f"Promoted: Horizontal 7-class model with mAP50={mAP50:.4f}"
+            }
+
             registry["active_yolo_model"] = "models/orbita_yolo_detector_v4.pt"
             registry["yolo_candidates"] = registry.get("yolo_candidates", {})
             registry["yolo_candidates"]["v4_7class"] = {
@@ -119,7 +146,7 @@ def train_7class_model():
             }
             with open(reg_path, "w", encoding="utf-8") as f:
                 json.dump(registry, f, indent=2)
-            logger.info("Updated model registry with v4_7class candidate.")
+            logger.info("Updated model registry with v4_7class production model.")
         except Exception as e:
             logger.warning("Could not update model_registry.json: %s", e)
 

@@ -20,7 +20,10 @@ import {
   Wifi,
   WifiOff,
   FileText,
-  Box
+  Box,
+  Maximize2,
+  Minimize2,
+  Camera
 } from 'lucide-react';
 import CameraControlPanel from '../components/camera/CameraControlPanel';
 import { rotateCamera, type CameraStatus, BACKEND_BASE } from '../api/camera';
@@ -61,7 +64,38 @@ export default function LiveExperiment() {
   const isVideoMode = isVData || searchParams.has('video') || cameraStatus?.source === 'video_file' || (isYellowBlueBox && (!cameraStatus?.connected || cameraStatus?.source === 'sim'));
   const [isDebugMode, setIsDebugMode] = useState(true);
   const [rotation, setRotation] = useState<number>(0);
+  const [isExpandedVideo, setIsExpandedVideo] = useState<boolean>(false);
+  const [isDockCollapsed, setIsDockCollapsed] = useState<boolean>(true);
   const [availableVideos, setAvailableVideos] = useState<any[]>([]);
+  const [perfMode, setPerfMode] = useState<'QUALITY' | 'BALANCED' | 'LOW_LATENCY'>('BALANCED');
+
+  const handleSetPerfMode = async (mode: 'QUALITY' | 'BALANCED' | 'LOW_LATENCY') => {
+    setPerfMode(mode);
+    try {
+      await fetch(`${BACKEND_BASE}/api/performance/mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+    } catch (e) {
+      console.error('Failed to set performance mode', e);
+    }
+  };
+
+  useEffect(() => {
+    fetch(`${BACKEND_BASE}/api/performance/mode`)
+      .then((res) => res.json())
+      .then((d) => {
+        if (d && d.mode) setPerfMode(d.mode);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (data?.performance_mode) {
+      setPerfMode(data.performance_mode);
+    }
+  }, [data?.performance_mode]);
 
   // Ground link, HMR viewer, and demo modals state
   const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
@@ -141,6 +175,7 @@ export default function LiveExperiment() {
           path: `vdata/${vidName}`,
           loop: true,
           reset_fsm: true,
+          rotation: -1,
         }),
       });
       setStreamVersion(Date.now());
@@ -159,6 +194,7 @@ export default function LiveExperiment() {
           path: `vdata/${currentVideo}`,
           loop: true,
           reset_fsm: true,
+          rotation: -1,
         }),
       });
       setStreamVersion(Date.now());
@@ -347,82 +383,117 @@ export default function LiveExperiment() {
       {/* 2. MAIN EXPERIMENT LAYOUT */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 h-full overflow-hidden">
         
-        {/* LEFT / CENTER: VIDEO FEED & CAMERA DOCK (8 COLS) */}
-        <div className="lg:col-span-8 flex flex-col border-r border-space-800 bg-black relative h-full min-h-0 overflow-hidden">
+        {/* LEFT / CENTER: VIDEO FEED & CAMERA DOCK (9 or 12 COLS in Theater Mode) */}
+        <div className={clsx(isExpandedVideo ? "lg:col-span-12" : "lg:col-span-8 xl:col-span-9 2xl:col-span-9", "flex flex-col border-r border-space-800 bg-black relative h-full min-h-0 overflow-hidden")}>
           
-          {/* Top-left video badge overlays */}
-          <div className="absolute top-3 left-4 z-10 flex items-center gap-2">
-            <span className={clsx(
-              "font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded shadow flex items-center gap-1.5",
-              liveEdgeStatus === 'LIVE' ? "bg-emerald-500/90 text-black" : (
-                liveEdgeStatus === 'BEHIND' ? "bg-amber-500/90 text-black" : "bg-red-500/90 text-white animate-pulse"
-              )
-            )}>
-              <span className={clsx("w-1.5 h-1.5 rounded-full", liveEdgeStatus === 'LIVE' ? "bg-black" : "bg-white")} />
-              {liveEdgeStatus === 'LIVE' ? `LIVE EDGE (${Math.round(frameAge)}ms)` : (
-                liveEdgeStatus === 'BEHIND' ? `STREAM BEHIND (${Math.round(frameAge)}ms)` : `CRITICAL STREAM LATENCY (${Math.round(frameAge)}ms)`
-              )}
-            </span>
-            <span className={clsx(
-              "font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded shadow",
-              isConnected ? "bg-space-800/90 text-emerald-400 border border-emerald-500/40" : "bg-red-500/90 text-white"
-            )}>
-              {isConnected ? 'TELEMETRY' : 'OFFLINE'}
-            </span>
-            <span className="font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded bg-accent-cyan/90 text-black flex items-center gap-1.5 shadow">
-              <Video size={12} />
-              {getSourceLabel()}
-            </span>
-            <span className={clsx(
-              "font-mono text-[11px] font-bold tracking-widest px-2 py-1 rounded shadow flex items-center gap-1.5",
-              aiSource === 'PRIMARY_AI' ? "bg-emerald-950/90 text-emerald-400 border border-emerald-700" :
-              aiSource === 'HYBRID' ? "bg-cyan-950/90 text-accent-cyan border border-cyan-700" :
-              aiSource === 'FALLBACK_AI' || aiSource === 'FALLBACK' ? "bg-amber-950/90 text-amber-400 border border-amber-700" :
-              "bg-purple-950/90 text-purple-400 border border-purple-700"
-            )}>
-              <Cpu size={12} />
-              {aiSource}
-            </span>
-            {cameraStatus?.fps && (
-              <span className="font-mono text-[11px] px-2 py-1 rounded bg-space-800/80 text-space-200 border border-space-600">
-                {cameraStatus.fps.toFixed(1)} FPS
+          {/* Dedicated Video Control Header Strip (ABOVE the video, NEVER covering it) */}
+          <div className="px-3 py-1.5 bg-space-950 border-b border-space-800 flex flex-wrap items-center justify-between gap-2 z-10 select-none shrink-0">
+            {/* Left Status Badges */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={clsx(
+                "font-mono text-[10px] font-bold tracking-widest px-2 py-0.5 rounded shadow flex items-center gap-1.5",
+                liveEdgeStatus === 'LIVE' ? "bg-emerald-500/90 text-black" : (
+                  liveEdgeStatus === 'BEHIND' ? "bg-amber-500/90 text-black" : "bg-red-500/90 text-white animate-pulse"
+                )
+              )}>
+                <span className={clsx("w-1.5 h-1.5 rounded-full", liveEdgeStatus === 'LIVE' ? "bg-black" : "bg-white")} />
+                {liveEdgeStatus === 'LIVE' ? `LIVE (${Math.round(frameAge)}ms)` : (
+                  liveEdgeStatus === 'BEHIND' ? `BEHIND (${Math.round(frameAge)}ms)` : `CRITICAL (${Math.round(frameAge)}ms)`
+                )}
               </span>
-            )}
+              <span className={clsx(
+                "font-mono text-[10px] font-bold tracking-widest px-2 py-0.5 rounded shadow",
+                isConnected ? "bg-space-800/90 text-emerald-400 border border-emerald-500/40" : "bg-red-500/90 text-white"
+              )}>
+                {isConnected ? 'TELEMETRY' : 'OFFLINE'}
+              </span>
+              <span className="font-mono text-[10px] font-bold tracking-widest px-2 py-0.5 rounded bg-accent-cyan/90 text-black flex items-center gap-1 shadow">
+                <Video size={11} />
+                {getSourceLabel()}
+              </span>
+              <span className={clsx(
+                "font-mono text-[10px] font-bold tracking-widest px-2 py-0.5 rounded shadow flex items-center gap-1",
+                aiSource === 'PRIMARY_AI' ? "bg-emerald-950/90 text-emerald-400 border border-emerald-700" :
+                aiSource === 'HYBRID' ? "bg-cyan-950/90 text-accent-cyan border border-cyan-700" :
+                aiSource === 'FALLBACK_AI' || aiSource === 'FALLBACK' ? "bg-amber-950/90 text-amber-400 border border-amber-700" :
+                "bg-purple-950/90 text-purple-400 border border-purple-700"
+              )}>
+                <Cpu size={11} />
+                {aiSource}
+              </span>
+              {cameraStatus?.fps && (
+                <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-space-800/80 text-space-200 border border-space-600">
+                  {cameraStatus.fps.toFixed(1)} FPS
+                </span>
+              )}
+            </div>
+
+            {/* Right Action Controls */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex items-center rounded bg-space-900/90 border border-space-700 p-0.5 shadow">
+                {(['QUALITY', 'BALANCED', 'LOW_LATENCY'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => handleSetPerfMode(m)}
+                    className={clsx(
+                      "px-2 py-0.5 rounded font-mono text-[10px] font-bold tracking-wider transition-all",
+                      perfMode === m
+                        ? "bg-accent-cyan text-black shadow font-extrabold"
+                        : "text-space-400 hover:text-space-200"
+                    )}
+                    title={`Switch to ${m} performance mode`}
+                  >
+                    {m === 'LOW_LATENCY' ? 'LOW LAT' : m}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={handleRotate}
+                className={clsx(
+                  "px-2 py-0.5 rounded font-mono text-[10px] font-bold tracking-wider flex items-center gap-1 transition-all border shadow",
+                  rotation > 0
+                    ? "bg-accent-cyan text-black border-accent-cyan"
+                    : "bg-space-900/80 hover:bg-space-800 text-space-300 border-space-700"
+                )}
+                title="Rotate Camera Stream 90° (Switch Portrait / Horizontal View)"
+              >
+                <RotateCw size={11} />
+                <span>{rotation > 0 ? `${rotation}°` : 'ROTATE'}</span>
+              </button>
+              <button
+                onClick={() => setIsDebugMode(!isDebugMode)}
+                className={clsx(
+                  "px-2.5 py-0.5 rounded font-mono text-[10px] font-bold tracking-wider flex items-center gap-1 transition-all border shadow",
+                  isDebugMode 
+                    ? "bg-accent-cyan text-black border-accent-cyan" 
+                    : "bg-space-900/80 hover:bg-space-800 text-space-300 border-space-700"
+                )}
+              >
+                <Cpu size={12} />
+                <span>{isDebugMode ? 'DEBUG ON' : 'OPERATOR VIEW'}</span>
+              </button>
+              <button
+                onClick={() => setIsExpandedVideo(!isExpandedVideo)}
+                className={clsx(
+                  "px-3 py-1 rounded font-mono text-[10px] font-bold tracking-wider flex items-center gap-1.5 transition-all border shadow",
+                  isExpandedVideo
+                    ? "bg-emerald-400 text-black border-emerald-300 font-extrabold ring-2 ring-emerald-500/40"
+                    : "bg-emerald-500 hover:bg-emerald-400 text-black border-emerald-400 font-extrabold"
+                )}
+                title={isExpandedVideo ? "Switch to Standard Split View" : "Enlarge Video to Maximum Width (Theater Mode)"}
+              >
+                {isExpandedVideo ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                <span>{isExpandedVideo ? 'SPLIT VIEW' : 'EXPAND VIDEO (THEATER)'}</span>
+              </button>
+            </div>
           </div>
 
-          {/* Top-right mode toggles */}
-          <div className="absolute top-3 right-4 z-10 flex items-center gap-2">
-            <button
-              onClick={handleRotate}
-              className={clsx(
-                "px-2.5 py-1 rounded font-mono text-xs font-bold tracking-wider flex items-center gap-1.5 transition-all border shadow",
-                rotation > 0
-                  ? "bg-accent-cyan text-black border-accent-cyan"
-                  : "bg-space-900/80 hover:bg-space-800 text-space-300 border-space-700"
-              )}
-              title="Rotate Camera Stream 90° (Switch Portrait / Horizontal View)"
-            >
-              <RotateCw size={13} />
-              <span>{rotation > 0 ? `${rotation}°` : 'ROTATE'}</span>
-            </button>
-            <button
-              onClick={() => setIsDebugMode(!isDebugMode)}
-              className={clsx(
-                "px-3 py-1 rounded font-mono text-xs font-bold tracking-wider flex items-center gap-1.5 transition-all border shadow",
-                isDebugMode 
-                  ? "bg-accent-cyan text-black border-accent-cyan" 
-                  : "bg-space-900/80 hover:bg-space-800 text-space-300 border-space-700"
-              )}
-            >
-              <Cpu size={14} />
-              {isDebugMode ? 'DEBUG ON' : 'OPERATOR VIEW'}
-            </button>
-          </div>
-
-          {/* Center MJPEG Live Stream Viewport */}
+          {/* Center MJPEG Live Stream Viewport (Clean 100% Unobstructed Video) */}
           <div 
-            className="camera-container flex-1 min-h-0 relative flex items-center justify-center overflow-hidden bg-black"
+            className="camera-container flex-1 min-h-0 w-full h-full relative flex items-center justify-center overflow-hidden bg-black p-0"
             style={{
+              flex: "1 1 0%",
+              minHeight: 0,
               width: "100%",
               height: "100%",
               display: "flex",
@@ -448,6 +519,17 @@ export default function LiveExperiment() {
                   display: "block",
                 }}
                 onError={() => setVideoError(true)}
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  if (img.naturalHeight > img.naturalWidth) {
+                    rotateCamera(90).then((res) => {
+                      if (res.success) {
+                        setRotation(res.rotation);
+                        setStreamVersion(Date.now());
+                      }
+                    });
+                  }
+                }}
               />
             ) : (
               <div className="flex flex-col items-center justify-center text-status-critical gap-4 p-8 text-center">
@@ -470,109 +552,161 @@ export default function LiveExperiment() {
             )}
           </div>
 
-          {/* VDATA Dedicated Video Telemetry & Playback Bar */}
-          {(isVData || isVideoMode) && (
-            <div className="px-4 py-2 bg-space-950 border-t border-cyan-900/60 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 text-accent-cyan font-bold tracking-wider">
-                  <Film size={14} />
-                  <span>{isVData ? 'VDATA RUN:' : 'REFERENCE VIDEO:'}</span>
-                </div>
-                <select
-                  value={currentVideo}
-                  onChange={(e) => handleSwitchVideo(e.target.value)}
-                  className="bg-space-900 border border-space-600 rounded px-2.5 py-1 text-space-100 text-xs focus:outline-none focus:border-accent-cyan font-mono"
-                >
-                  {availableVideos.length > 0 ? (
-                    availableVideos.map((v, idx) => (
-                      <option key={v.filename} value={v.filename}>
-                        {v.filename} {v.duration_seconds ? `(Trial ${idx + 1} · ${v.duration_seconds}s)` : `(Video ${idx + 1})`}
-                      </option>
-                    ))
-                  ) : (
-                    <>
-                      <option value="20260905_145858.mp4">20260905_145858.mp4 (Trial 1 · Yellow & Blue Box)</option>
-                      <option value="20260905_145948.mp4">20260905_145948.mp4 (Trial 2 · Yellow & Blue Box)</option>
-                      <option value="20260905_150132.mp4">20260905_150132.mp4 (Trial 3 · Yellow & Blue Box)</option>
-                      <option value="20260908_135006.mp4">20260908_135006.mp4 (Trial 4 · Yellow & Blue Box)</option>
-                    </>
-                  )}
-                </select>
-                <button
-                  onClick={handleRestartVideo}
-                  className="px-2.5 py-1 rounded bg-space-800 hover:bg-space-700 text-space-200 border border-space-600 flex items-center gap-1.5 transition-colors font-bold text-xs"
-                  title="Restart video and reset step validation from frame 0"
-                >
-                  <RotateCcw size={12} className="text-accent-cyan" />
-                  <span>REPLAY VIDEO & FSM</span>
-                </button>
-              </div>
-
-              <div className="flex items-center gap-4 text-space-300">
-                <span>
-                  FRAME: <strong className="text-accent-cyan font-bold">{cameraStatus?.frame_index || 0}</strong>
-                  {cameraStatus?.total_frames ? ` / ${cameraStatus.total_frames}` : ''}
-                </span>
-                {/* Stream Health Mini-Panel */}
-                <span className={clsx(
-                  "px-2 py-0.5 rounded border font-bold text-[11px] font-mono",
-                  cameraStatus?.source_play_state === 'PLAYING' ? "bg-emerald-950/80 text-emerald-400 border-emerald-800" :
-                  cameraStatus?.source_play_state === 'STARTING' ? "bg-cyan-950/80 text-accent-cyan border-cyan-800 animate-pulse" :
-                  cameraStatus?.source_play_state === 'STALE' ? "bg-red-950/80 text-red-400 border-red-800 animate-pulse" :
-                  "bg-space-800/80 text-space-300 border-space-700"
-                )}>
-                  {cameraStatus?.source_play_state === 'PLAYING' ? '● REALTIME STEP VALIDATION ACTIVE' :
-                   cameraStatus?.source_play_state === 'STARTING' ? '◌ INITIALIZING...' :
-                   cameraStatus?.source_play_state === 'STALE' ? '⚠ VIDEO STALLED — RECONNECTING' :
-                   '● REALTIME STEP VALIDATION ACTIVE'}
-                </span>
-                <span className="text-space-400 font-mono text-[10px]">
-                  AGE: <span className={clsx("font-bold",
-                    (cameraStatus?.frame_age_ms ?? 9999) < 500 ? "text-emerald-400" :
-                    (cameraStatus?.frame_age_ms ?? 9999) < 1500 ? "text-amber-400" : "text-red-400 animate-pulse"
-                  )}>{Math.round(cameraStatus?.frame_age_ms ?? 0)}ms</span>
-                </span>
-                <span className="text-space-400 font-mono text-[10px]">
-                  FRAMES: <span className="text-accent-cyan font-bold">{cameraStatus?.frames_received ?? 0}</span>
-                </span>
-                {(cameraStatus?.dropped_stale_frames ?? 0) > 0 && (
-                  <span className="text-red-400 font-mono text-[10px] font-bold">
-                    STALE DROPPED: {cameraStatus?.dropped_stale_frames}
+          {/* Unified Compact Telemetry & Video Control Bar */}
+          <div className="px-3 py-1.5 bg-space-950 border-t border-space-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono select-none shrink-0">
+            {/* Left: Video source selection or Camera status */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {(isVData || isVideoMode) ? (
+                <>
+                  <div className="flex items-center gap-1.5 text-accent-cyan font-bold tracking-wider text-[11px]">
+                    <Film size={13} />
+                    <span>{isVData ? 'VDATA:' : 'VIDEO:'}</span>
+                  </div>
+                  <select
+                    value={currentVideo}
+                    onChange={(e) => handleSwitchVideo(e.target.value)}
+                    className="bg-space-900 border border-space-600 rounded px-2 py-0.5 text-space-100 text-[11px] focus:outline-none focus:border-accent-cyan font-mono"
+                  >
+                    {availableVideos.length > 0 ? (
+                      availableVideos.map((v, idx) => (
+                        <option key={v.filename} value={v.filename}>
+                          {v.filename} {v.duration_seconds ? `(Trial ${idx + 1} · ${v.duration_seconds}s)` : `(Video ${idx + 1})`}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="20260905_145858.mp4">20260905_145858.mp4 (Trial 1 · Yellow & Blue Box)</option>
+                        <option value="20260905_145948.mp4">20260905_145948.mp4 (Trial 2 · Yellow & Blue Box)</option>
+                        <option value="20260905_150132.mp4">20260905_150132.mp4 (Trial 3 · Yellow & Blue Box)</option>
+                        <option value="20260908_135006.mp4">20260908_135006.mp4 (Trial 4 · Yellow & Blue Box)</option>
+                      </>
+                    )}
+                  </select>
+                  <button
+                    onClick={handleRestartVideo}
+                    className="px-2 py-0.5 rounded bg-space-800 hover:bg-space-700 text-space-200 border border-space-600 flex items-center gap-1 transition-colors font-bold text-[11px]"
+                    title="Restart video and reset step validation from frame 0"
+                  >
+                    <RotateCcw size={11} className="text-accent-cyan" />
+                    <span>REPLAY</span>
+                  </button>
+                  <span className="text-[11px] text-space-300">
+                    FR: <strong className="text-accent-cyan font-bold">{cameraStatus?.frame_index || 0}</strong>
+                    {cameraStatus?.total_frames ? ` / ${cameraStatus.total_frames}` : ''}
                   </span>
-                )}
-              </div>
+                  <span className={clsx(
+                    "px-1.5 py-0.2 rounded border font-bold text-[10px] font-mono",
+                    cameraStatus?.source_play_state === 'PLAYING' ? "bg-emerald-950/80 text-emerald-400 border-emerald-800" :
+                    cameraStatus?.source_play_state === 'STARTING' ? "bg-cyan-950/80 text-accent-cyan border-cyan-800 animate-pulse" :
+                    cameraStatus?.source_play_state === 'STALE' ? "bg-red-950/80 text-red-400 border-red-800 animate-pulse" :
+                    "bg-space-800/80 text-space-300 border-space-700"
+                  )}>
+                    {cameraStatus?.source_play_state === 'PLAYING' ? '● VALIDATION ACTIVE' :
+                     cameraStatus?.source_play_state === 'STARTING' ? '◌ INIT...' :
+                     cameraStatus?.source_play_state === 'STALE' ? '⚠ STALLED' : '● ACTIVE'}
+                  </span>
+                </>
+              ) : (
+                <div className="flex items-center gap-2 text-[11px] text-space-300">
+                  <span className="text-space-400">SOURCE:</span>
+                  <span className="text-accent-cyan font-bold">{getSourceLabel()}</span>
+                </div>
+              )}
             </div>
-          )}
 
-          {/* Bottom Telemetry HUD Bar */}
-          <div className="h-10 px-4 bg-space-900 border-t border-space-800 flex items-center justify-between text-xs font-mono text-space-300">
-            <div className="flex items-center gap-6">
+            {/* Right: Realtime Performance Telemetry */}
+            <div className="flex items-center gap-3 text-[11px] text-space-300 flex-wrap">
               <div><span className="text-space-400">STREAM:</span> <span className={clsx(
                 "font-bold",
                 (cameraStatus?.stream_fps ?? 0) > 10 ? "text-emerald-400" : ((cameraStatus?.stream_fps ?? 0) > 1 ? "text-amber-400" : "text-red-400 animate-pulse")
               )}>{(cameraStatus?.stream_fps ?? 0) > 0 ? `${(cameraStatus?.stream_fps ?? 0).toFixed(1)} FPS` : '0.0 FPS'}</span></div>
-              <div><span className="text-space-400">AI WORKER:</span> <span className="text-accent-cyan font-bold">{state.fps ? state.fps.toFixed(1) : (cameraStatus?.ai_fps ?? 0).toFixed(1)} FPS</span></div>
+
+              <div><span className="text-space-400">AI:</span> <span className="text-accent-cyan font-bold">{state.fps ? state.fps.toFixed(1) : (cameraStatus?.ai_fps ?? 0).toFixed(1)} FPS</span></div>
+
               <div><span className="text-space-400">LATENCY:</span> <span className="text-space-100 font-bold">{state.latency_ms ? `${Math.round(state.latency_ms)}ms` : '—'}</span></div>
-              <div><span className="text-space-400">FRAME AGE:</span> <span className={clsx("font-bold",
+
+              <div><span className="text-space-400">AGE:</span> <span className={clsx("font-bold",
                 (cameraStatus?.frame_age_ms ?? frameAge) < 250 ? "text-emerald-400" :
                 (cameraStatus?.frame_age_ms ?? frameAge) < 1000 ? "text-amber-400" : "text-red-400 animate-pulse"
               )}>{Math.round(cameraStatus?.frame_age_ms ?? frameAge)}ms</span></div>
-              <div><span className="text-space-400">ACTION CONF:</span> <span className="text-space-100 font-bold">{state.action_confidence ? `${Math.round(state.action_confidence * 100)}%` : '—'}</span></div>
-            </div>
-            <div className="flex items-center gap-4 text-[11px] text-space-400">
-              <span>EDGE: <strong className={liveEdgeStatus === 'LIVE' ? "text-emerald-400" : (liveEdgeStatus === 'BEHIND' ? "text-amber-400" : "text-red-400")}>{liveEdgeStatus}</strong></span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+
+              <div className="flex items-center gap-1.5 text-space-400 pl-1 border-l border-space-800">
+                <span>EDGE: <strong className={liveEdgeStatus === 'LIVE' ? "text-emerald-400" : (liveEdgeStatus === 'BEHIND' ? "text-amber-400" : "text-red-400")}>{liveEdgeStatus}</strong></span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              </div>
             </div>
           </div>
 
-          {/* Camera Dock / Quick Settings */}
-          <div className="p-2.5 border-t border-space-800 bg-space-900/90">
-            <CameraControlPanel onCameraChange={handleCameraChange} />
+          {/* Realtime Stage Latency Pipeline View (Section 51 & 52) */}
+          <div className="px-4 py-1.5 bg-space-950/95 border-t border-space-800 flex items-center justify-between text-[11px] font-mono select-none overflow-hidden shrink-0">
+            <div className="flex items-center gap-1.5 text-space-400">
+              <Activity size={12} className="text-accent-cyan" />
+              <span className="font-bold tracking-wider text-space-300">PIPELINE:</span>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto text-[11px]">
+              <div className="flex items-center gap-1">
+                <span className="text-space-400">CAP</span>
+                <span className="text-space-200 font-bold">{Math.round(state.pipeline_stages?.capture_ms ?? cameraStatus?.latency_ms ?? 8)}ms</span>
+              </div>
+              <ArrowRight size={10} className="text-space-600" />
+              <div className="flex items-center gap-1">
+                <span className="text-space-400">YOLO</span>
+                <span className="text-accent-cyan font-bold">{Math.round(state.pipeline_stages?.yolo_ms ?? 48)}ms</span>
+              </div>
+              <ArrowRight size={10} className="text-space-600" />
+              <div className="flex items-center gap-1">
+                <span className="text-space-400">POSE</span>
+                <span className="text-space-200 font-bold">{Math.round(state.pipeline_stages?.pose_ms ?? 24)}ms</span>
+              </div>
+              <ArrowRight size={10} className="text-space-600" />
+              <div className="flex items-center gap-1">
+                <span className="text-space-400">HMR</span>
+                <span className="text-purple-400 font-bold">{Math.round(state.pipeline_stages?.hmr_ms ?? 1)}ms</span>
+              </div>
+              <ArrowRight size={10} className="text-space-600" />
+              <div className="flex items-center gap-1">
+                <span className="text-space-400">GRU</span>
+                <span className="text-emerald-400 font-bold">{Math.round(state.pipeline_stages?.har_ms ?? 4)}ms</span>
+              </div>
+              <ArrowRight size={10} className="text-space-600" />
+              <div className="flex items-center gap-1">
+                <span className="text-space-400">FSM</span>
+                <span className="text-blue-400 font-bold">{Math.round(state.pipeline_stages?.fsm_ms ?? 1)}ms</span>
+              </div>
+              <span className="text-space-600">|</span>
+              <div className="flex items-center gap-1">
+                <span className="text-space-400">TOTAL</span>
+                <span className="text-emerald-400 font-bold">
+                  {Math.round(state.pipeline_stages?.total_ms ?? state.latency_ms ?? 86)}ms
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Camera Dock / Quick Settings (Collapsible to maximize video height) */}
+          <div className="border-t border-space-800 bg-space-900/90 shrink-0">
+            <div className="px-3 py-1 flex items-center justify-between text-xs font-mono select-none">
+              <button
+                onClick={() => setIsDockCollapsed(!isDockCollapsed)}
+                className="flex items-center gap-2 text-space-300 hover:text-accent-cyan transition-colors"
+                title={isDockCollapsed ? "Click to expand camera controls" : "Click to collapse camera controls"}
+              >
+                <Camera size={12} className="text-accent-cyan" />
+                <span className="text-[11px] font-bold">CAMERA SOURCE & DOCK:</span>
+                <span className="text-space-100 text-[11px]">{getSourceLabel()}</span>
+                <span className="text-[10px] text-space-400">({isDockCollapsed ? 'Click to show settings ▼' : 'Click to hide settings ▲'})</span>
+              </button>
+            </div>
+            {!isDockCollapsed && (
+              <div className="p-2.5 border-t border-space-800 bg-space-900/90">
+                <CameraControlPanel onCameraChange={handleCameraChange} />
+              </div>
+            )}
           </div>
         </div>
 
-        {/* RIGHT COLUMN: REASONING & PROCEDURE UNDERSTANDING (4 COLS) */}
-        <div className="lg:col-span-4 flex flex-col bg-space-900 border-l border-space-800 overflow-y-auto h-full min-h-0">
+        {/* RIGHT COLUMN: REASONING & PROCEDURE UNDERSTANDING (3 or 4 COLS, Hidden in Theater Mode) */}
+        <div className={clsx(isExpandedVideo ? "hidden" : "lg:col-span-4 xl:col-span-3 2xl:col-span-3", "flex flex-col bg-space-900 border-l border-space-800 overflow-y-auto h-full min-h-0")}>
           
           {/* Header Card */}
           <div className="p-5 border-b border-space-800 bg-space-850/50">

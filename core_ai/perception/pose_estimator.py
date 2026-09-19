@@ -119,6 +119,7 @@ class PoseEstimator:
 
         self._frame_count: int = 0
         self._last_poses: list[PoseResult] = []
+        self._last_hmr_mesh: Optional[HMRMeshResult] = None
         self.cadence: int = getattr(config, "cadence", 3)
         self.imgsz: int = getattr(config, "imgsz", 480)
 
@@ -148,11 +149,17 @@ class PoseEstimator:
         else:
             poses = self._estimate_mock(frame, timestamp)
 
-        # Attach 3D Human Mesh Recovery (HMR) representation
+        # Attach 3D Human Mesh Recovery (HMR) representation with cadence control
         if self.hmr is not None:
+            hmr_interval = getattr(self.config, "hmr_interval", 3)
+            should_run_hmr = (self._frame_count % hmr_interval == 1) or (self._last_hmr_mesh is None)
             for p in poses:
                 if p.hmr_mesh is None:
-                    p.hmr_mesh = self.hmr.process(frame, p.bbox, keypoints_2d=p.keypoints_px)
+                    if should_run_hmr:
+                        p.hmr_mesh = self.hmr.process(frame, p.bbox, keypoints_2d=p.keypoints_px)
+                        self._last_hmr_mesh = p.hmr_mesh
+                    else:
+                        p.hmr_mesh = self._last_hmr_mesh
         return poses
 
     def draw(self, frame: np.ndarray, results: list[PoseResult]) -> np.ndarray:
@@ -207,12 +214,14 @@ class PoseEstimator:
             return []
 
         try:
-            results = self._model.predict(
-                frame,
-                imgsz=self.imgsz,
-                verbose=False,
-                stream=False,
-            )
+            import torch
+            with torch.inference_mode():
+                results = self._model.predict(
+                    frame,
+                    imgsz=self.imgsz,
+                    verbose=False,
+                    stream=False,
+                )
             poses: list[PoseResult] = []
             for r in results:
                 if r.keypoints is None:

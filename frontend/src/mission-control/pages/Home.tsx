@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "../mission-control.css";
 import CameraControlPanel from "../../components/camera/CameraControlPanel";
-import { BACKEND_BASE, getCameraStatus, connectCamera } from "../../api/camera";
+import { BACKEND_BASE, getCameraStatus, connectCamera, rotateCamera } from "../../api/camera";
 import {
   Activity,
   AlertTriangle,
@@ -212,6 +212,14 @@ function CameraFeed({
               zIndex: 1,
             }}
             onError={() => setStreamError(true)}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              if (img.naturalHeight > img.naturalWidth) {
+                rotateCamera(90).then((res) => {
+                  if (res.success) setStreamVersion(Date.now());
+                });
+              }
+            }}
           />
         ) : (
           <div

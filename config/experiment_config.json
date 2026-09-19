@@ -179,10 +179,53 @@
     "UNCERTAIN": "Unable to confidently confirm action. Position held.",
     "TIMEOUT": "Step timeout. Please proceed with {expected_action}."
   },
+  "zones": {
+    "LOCATION_A": {
+      "type": "polygon",
+      "coordinates": [
+        [0.10, 0.08],
+        [0.42, 0.08],
+        [0.42, 0.68],
+        [0.10, 0.68]
+      ],
+      "label": "Location A (Left Zone)",
+      "color": [255, 180, 50]
+    },
+    "LOCATION_B": {
+      "type": "polygon",
+      "coordinates": [
+        [0.58, 0.08],
+        [0.90, 0.08],
+        [0.90, 0.68],
+        [0.58, 0.68]
+      ],
+      "label": "Location B (Right Zone)",
+      "color": [50, 180, 255]
+    },
+    "TABLE_ROI": {
+      "type": "rectangle",
+      "coordinates": [0.02, 0.05, 0.98, 0.98],
+      "label": "Active Table Workspace",
+      "color": [100, 255, 100]
+    }
+  },
   "thresholds": {
     "action_confidence_min": 0.50,
     "interaction_frames_required": 4,
     "hand_object_contact_distance_px": 65,
-    "temporal_window_frames": 30
+    "temporal_window_frames": 30,
+    "detection_confirm_frames": 3,
+    "object_lost_frames": 8,
+    "contact_confirm_frames": 3,
+    "zone_confirm_frames": 3,
+    "class_confidence_thresholds": {
+      "pen": 0.18,
+      "watch": 0.20,
+      "blue_box": 0.25,
+      "yellow_box": 0.12,
+      "hand": 0.25,
+      "location_a": 0.25,
+      "location_b": 0.25
+    }
   }
 }
