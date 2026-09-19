@@ -42,10 +42,17 @@ const CLASS_COLOR_MAP: Record<string, { border: string; bg: string; text: string
   TOOL: { border: 'border-cyan-500', bg: 'bg-cyan-500/20', text: 'text-cyan-400' },
 };
 
+const DEFAULT_VDATA_VIDEOS: VdataVideo[] = [
+  { filename: '20260905_145858.mp4', path: '/vdata/20260905_145858.mp4', duration_seconds: 23.5, total_frames: 704, fps: 30, width: 1920, height: 1080, resolution: '1920x1080', size_mb: 115.3 },
+  { filename: '20260905_145948.mp4', path: '/vdata/20260905_145948.mp4', duration_seconds: 20.3, total_frames: 609, fps: 30, width: 1920, height: 1080, resolution: '1920x1080', size_mb: 99.8 },
+  { filename: '20260905_150132.mp4', path: '/vdata/20260905_150132.mp4', duration_seconds: 16.7, total_frames: 500, fps: 30, width: 1920, height: 1080, resolution: '1920x1080', size_mb: 81.8 },
+  { filename: '20260908_135006.mp4', path: '/vdata/20260908_135006.mp4', duration_seconds: 61.0, total_frames: 1830, fps: 30, width: 1920, height: 1080, resolution: '1920x1080', size_mb: 125.4 },
+];
+
 export default function VdataVideoInspector() {
-  const [videos, setVideos] = useState<VdataVideo[]>([]);
-  const [selectedVideo, setSelectedVideo] = useState<string>('');
-  const [mode, setMode] = useState<'stream' | 'scrub'>('stream');
+  const [videos, setVideos] = useState<VdataVideo[]>(DEFAULT_VDATA_VIDEOS);
+  const [selectedVideo, setSelectedVideo] = useState<string>('20260905_145858.mp4');
+  const [mode, setMode] = useState<'video' | 'stream' | 'scrub'>('video');
   const [isPlayingStream, setIsPlayingStream] = useState<boolean>(true);
   const [currentFrameIdx, setCurrentFrameIdx] = useState<number>(0);
   const [frameData, setFrameData] = useState<InspectFrameResult | null>(null);
@@ -61,9 +68,11 @@ export default function VdataVideoInspector() {
         const res = await fetch(`${BACKEND_BASE}/api/vdata/videos`);
         if (res.ok) {
           const data: VdataVideo[] = await res.json();
-          setVideos(data);
-          if (data.length > 0 && !selectedVideo) {
-            setSelectedVideo(data[0].filename);
+          if (Array.isArray(data) && data.length > 0) {
+            setVideos(data);
+            if (!selectedVideo) {
+              setSelectedVideo(data[0].filename);
+            }
           }
         }
       } catch (err) {
@@ -132,7 +141,18 @@ export default function VdataVideoInspector() {
         </div>
 
         {/* View Mode Toggle */}
-        <div className="flex items-center bg-space-800 p-1 rounded-lg border border-space-600 self-start md:self-auto">
+        <div className="flex items-center bg-space-800 p-1 rounded-lg border border-space-600 self-start md:self-auto gap-1">
+          <button
+            onClick={() => setMode('video')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold transition-colors ${
+              mode === 'video'
+                ? 'bg-accent-cyan text-space-900 shadow-md'
+                : 'text-space-300 hover:text-white'
+            }`}
+          >
+            <Film className="w-3.5 h-3.5" />
+            Direct Video Player
+          </button>
           <button
             onClick={() => setMode('stream')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold transition-colors ${
@@ -142,7 +162,7 @@ export default function VdataVideoInspector() {
             }`}
           >
             <Play className="w-3.5 h-3.5" />
-            Live Detection Stream
+            Live AI Stream
           </button>
           <button
             onClick={() => setMode('scrub')}
@@ -152,8 +172,8 @@ export default function VdataVideoInspector() {
                 : 'text-space-300 hover:text-white'
             }`}
           >
-            <Film className="w-3.5 h-3.5" />
-            Frame-by-Frame Scrubber
+            <Cpu className="w-3.5 h-3.5" />
+            Frame Scrubber
           </button>
         </div>
       </div>
@@ -204,27 +224,46 @@ export default function VdataVideoInspector() {
         {/* Video Player Display */}
         <div className="lg:col-span-2 flex flex-col bg-space-950 border border-space-700 rounded-lg overflow-hidden shadow-inner">
           <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
-            {mode === 'stream' && selectedVideo ? (
+            {mode === 'video' && selectedVideo ? (
+              <video
+                key={selectedVideo}
+                controls
+                autoPlay
+                preload="metadata"
+                playsInline
+                src={`/vdata/${selectedVideo}`}
+                className="w-full h-full object-contain"
+              />
+            ) : mode === 'stream' && selectedVideo ? (
               isPlayingStream ? (
                 <>
                   {streamError ? (
                     <div className="flex flex-col items-center justify-center text-space-400 gap-3 p-6 text-center">
                       <AlertTriangle className="w-10 h-10 text-amber-400 animate-pulse" />
-                      <div className="text-sm font-bold text-space-200">Stream Connection Error</div>
+                      <div className="text-sm font-bold text-space-200">AI Stream Offline / Reconnecting</div>
                       <span className="text-xs text-space-400 max-w-sm">
-                        Unable to stream "{selectedVideo}".
+                        Live Python inference stream unavailable. Switch to Direct Video Player to play {selectedVideo} directly from VDATA.
                       </span>
-                      <button
-                        onClick={() => {
-                          setStreamError(false);
-                          setStreamLoading(true);
-                          setStreamKey(Date.now());
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-cyan/20 border border-accent-cyan text-accent-cyan rounded text-xs hover:bg-accent-cyan/30 transition-all font-bold"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        Retry Stream
-                      </button>
+                      <div className="flex items-center gap-2 mt-1">
+                        <button
+                          onClick={() => setMode('video')}
+                          className="flex items-center gap-1.5 px-3.5 py-1.5 bg-accent-cyan text-space-950 font-bold rounded text-xs hover:bg-sky-400 transition-all shadow-md"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          Play Direct Video (/vdata)
+                        </button>
+                        <button
+                          onClick={() => {
+                            setStreamError(false);
+                            setStreamLoading(true);
+                            setStreamKey(Date.now());
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-space-800 border border-space-600 text-space-300 rounded text-xs hover:text-white transition-all font-bold"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          Retry AI Stream
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <img
@@ -272,17 +311,36 @@ export default function VdataVideoInspector() {
             {/* Overlaid Badges */}
             <div className="absolute top-3 left-3 bg-space-900/90 backdrop-blur-md border border-space-600 px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              YOLO ACTIVE DETECTION
+              {mode === 'video' ? 'VDATA DIRECT MP4 PLAYBACK' : 'YOLO ACTIVE DETECTION'}
             </div>
 
             <div className="absolute top-3 right-3 bg-space-900/90 backdrop-blur-md border border-space-600 px-2.5 py-1 rounded text-[11px] text-space-300">
-              {mode === 'stream' ? 'LIVE CONTINUOUS LOOP' : `FRAME ${currentFrameIdx} / ${totalFrames}`}
+              {mode === 'video' ? `/vdata/${selectedVideo}` : mode === 'stream' ? 'LIVE CONTINUOUS LOOP' : `FRAME ${currentFrameIdx} / ${totalFrames}`}
             </div>
           </div>
 
           {/* Controls Bar */}
           <div className="p-4 bg-space-900 border-t border-space-700 flex flex-col gap-3">
-            {mode === 'stream' ? (
+            {mode === 'video' ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+                <div className="flex items-center gap-2">
+                  <span className="text-space-400">PATH:</span>
+                  <span className="text-accent-cyan font-bold">/vdata/{selectedVideo}</span>
+                  <span className="text-space-500">•</span>
+                  <span className="text-space-300">{activeVideoMeta?.size_mb || 115} MB</span>
+                  <span className="text-space-500">•</span>
+                  <span className="text-space-300">{activeVideoMeta?.resolution || '1920x1080'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800 text-[10px] font-bold">
+                    HTTP RANGE SEEKING
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800 text-[10px] font-bold">
+                    VERCEL STATIC CDN
+                  </span>
+                </div>
+              </div>
+            ) : mode === 'stream' ? (
               <div className="flex items-center justify-between">
                 <button
                   onClick={() => setIsPlayingStream(!isPlayingStream)}
