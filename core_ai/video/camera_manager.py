@@ -279,18 +279,32 @@ class CameraManager:
         Unified pipeline: frames flow through the exact same perception -> tracking -> FSM pipeline.
         """
         from pathlib import Path
-        p = Path(video_path)
-        if not p.exists():
-            return False, f"Video file '{video_path}' not found."
+
+        is_remote_url = video_path.startswith("http://") or video_path.startswith("https://")
+        is_gdrive_endpoint = "/api/vdata/gdrive/video/" in video_path or video_path.startswith("gdrive:")
+
+        if is_gdrive_endpoint:
+            file_id = video_path.split("/")[-1].replace("gdrive:", "").strip()
+            from core_ai.dataset.gdrive_sync import gdrive_sync_manager
+            if not gdrive_sync_manager.is_file_authorized(file_id):
+                return False, f"Google Drive file '{file_id}' is not authorized."
+            resolved_source = gdrive_sync_manager._resolve_direct_download_url(file_id)
+        elif is_remote_url:
+            resolved_source = video_path
+        else:
+            p = Path(video_path)
+            if not p.exists():
+                return False, f"Video file '{video_path}' not found."
+            resolved_source = str(p.resolve())
 
         with self._lock:
-            logger.info("CameraManager: Loading video file: %s (loop=%s)", video_path, loop)
+            logger.info("CameraManager: Loading video source: %s (loop=%s)", video_path, loop)
             self._status = "connecting"
             self._last_error = None
             self._release_all()
 
             cfg = CameraConfig(
-                source=str(p.resolve()),
+                source=resolved_source,
                 width=self.default_config.width,
                 height=self.default_config.height,
                 fps=self.default_config.fps,
@@ -303,7 +317,7 @@ class CameraManager:
             if cam.start():
                 self._jetson_camera = cam
                 self._active_source = "video_file"
-                self._active_url = str(p.resolve())
+                self._active_url = video_path
                 self._status = "connected"
                 return True, ""
             else:

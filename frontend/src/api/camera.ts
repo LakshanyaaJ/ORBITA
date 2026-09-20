@@ -83,9 +83,14 @@ export interface ConnectCameraParams {
 }
 
 export const BACKEND_BASE =
-  typeof window !== 'undefined' && window.location.hostname
+  (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/+$/, '') ||
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'http://localhost:8000'
+    : typeof window !== 'undefined' && window.location.port === '5173'
     ? `${window.location.protocol}//${window.location.hostname}:8000`
-    : 'http://localhost:8000';
+    : typeof window !== 'undefined'
+    ? window.location.origin
+    : 'http://localhost:8000');
 
 export async function getCameraStatus(): Promise<CameraStatus> {
   try {

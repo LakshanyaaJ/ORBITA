@@ -39,7 +39,7 @@ def test_gdrive_sync_manager_status(tmp_path):
     """Verify GDriveSyncManager initializes and tracks files."""
     mgr = GDriveSyncManager(target_dir=tmp_path)
     status = mgr.get_status()
-    assert status["status"] in ("idle", "completed")
+    assert status["status"] in ("online", "idle", "completed")
     assert status["folder_id"] == DEFAULT_GDRIVE_FOLDER_ID
     assert status["local_video_count"] == 0
 
@@ -53,7 +53,7 @@ def test_gdrive_sync_manager_status(tmp_path):
 
 
 def test_api_gdrive_endpoints():
-    """Verify FastAPI endpoints for Google Drive dataset video sync."""
+    """Verify FastAPI endpoints for Google Drive online video catalog."""
     client = TestClient(app)
 
     # 1. GET status
@@ -64,8 +64,16 @@ def test_api_gdrive_endpoints():
     assert data["folder_id"] == DEFAULT_GDRIVE_FOLDER_ID
     assert "local_video_count" in data
 
-    # 2. POST sync start
-    res_sync = client.post("/api/vdata/gdrive/sync", json={"force": False})
-    assert res_sync.status_code == 200
-    sync_data = res_sync.json()
-    assert sync_data["status"] in ("started", "in_progress")
+    # 2. GET videos catalog
+    res_vids = client.get("/api/vdata/gdrive/videos")
+    assert res_vids.status_code == 200
+    vids_data = res_vids.json()
+    assert "videos" in vids_data
+    assert vids_data["count"] >= 4
+
+    # 3. POST list/scan
+    res_list = client.post("/api/vdata/gdrive/list", json={})
+    assert res_list.status_code == 200
+    list_data = res_list.json()
+    assert list_data["status"] == "ok"
+    assert "videos" in list_data

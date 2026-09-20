@@ -42,6 +42,7 @@ export default function DatasetControlPanel() {
   } | null>(null);
 
   const [candidates, setCandidates] = useState<CandidateItem[]>([]);
+  const [gdriveStats, setGDriveStats] = useState<{ online_video_count: number; local_video_count: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
@@ -56,6 +57,14 @@ export default function DatasetControlPanel() {
       if (candRes.ok) {
         const candData = await candRes.json();
         setCandidates(candData);
+      }
+      const gdRes = await fetch(`${BACKEND_BASE}/api/vdata/gdrive/status`);
+      if (gdRes.ok) {
+        const gdData = await gdRes.json();
+        setGDriveStats({
+          online_video_count: gdData.online_video_count ?? 4,
+          local_video_count: gdData.local_video_count ?? 0,
+        });
       }
     } catch {
       // Backend offline or reconnecting
@@ -177,17 +186,15 @@ export default function DatasetControlPanel() {
       {/* Top Metrics Grid */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <div className="bg-[#0b0f15] p-3 rounded-lg border border-[#1b2433]">
-          <div className="text-[10px] text-slate-400 uppercase font-mono">Ref Videos</div>
-          <div className="text-xl font-bold text-cyan-400 mt-1">{manifest?.total_videos ?? 3}</div>
-          <div className="text-[10px] text-slate-500 mt-0.5">vdata/ catalog</div>
+          <div className="text-[10px] text-slate-400 uppercase font-mono">Drive Videos</div>
+          <div className="text-xl font-bold text-cyan-400 mt-1">{gdriveStats?.online_video_count ?? 4}</div>
+          <div className="text-[10px] text-emerald-400 mt-0.5 font-mono">ONLINE AVAILABLE</div>
         </div>
 
         <div className="bg-[#0b0f15] p-3 rounded-lg border border-[#1b2433]">
-          <div className="text-[10px] text-slate-400 uppercase font-mono">Extracted Frames</div>
-          <div className="text-xl font-bold text-white mt-1">{manifest?.total_extracted_frames ?? 0}</div>
-          <div className="text-[10px] text-slate-500 mt-0.5">
-            {manifest?.split_counts ? `${manifest.split_counts.train}T / ${manifest.split_counts.val}V / ${manifest.split_counts.test}Te` : 'Adaptive 2.5 FPS'}
-          </div>
+          <div className="text-[10px] text-slate-400 uppercase font-mono">Local Videos</div>
+          <div className="text-xl font-bold text-white mt-1">{gdriveStats?.local_video_count ?? manifest?.total_videos ?? 0}</div>
+          <div className="text-[10px] text-slate-500 mt-0.5 font-mono">vdata/ storage</div>
         </div>
 
         <div className="bg-[#0b0f15] p-3 rounded-lg border border-[#1b2433]">

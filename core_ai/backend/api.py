@@ -34,7 +34,7 @@ import cv2
 import numpy as np
 import psutil
 import urllib.parse
-from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -409,12 +409,14 @@ async def _startup() -> None:
 
     logger.info("ORBITA low-latency backend initialized (AI Worker + Decoupled Streamer active).")
 
-    # Cloud/Deployed sync: check if vdata/ is empty and auto-sync from Google Drive
-    auto_sync_gdrive = os.getenv("ORBITA_AUTO_SYNC_GDRIVE", "true").lower() in ("true", "1", "yes")
-    vdata_dir = Path("vdata")
-    if auto_sync_gdrive and (not vdata_dir.exists() or len(list(vdata_dir.glob("*.mp4"))) == 0):
-        logger.info("No local reference videos detected in vdata/. Auto-initiating Google Drive cloud sync...")
-        gdrive_sync_manager.start_sync()
+    # Initialize Google Drive online dataset catalog in background (zero download to local disk)
+    logger.info("Initializing Google Drive online dataset catalog...")
+    threading.Thread(
+        target=gdrive_sync_manager.list_remote_videos,
+        kwargs={"force_refresh": False},
+        daemon=True,
+        name="gdrive-catalog-init",
+    ).start()
 
 
 async def _shutdown() -> None:
@@ -2253,34 +2255,70 @@ async def api_models_promote(body: dict):
 
 
 # =========================================================================== #
-# Google Drive Cloud Dataset Synchronization Endpoints
+# Google Drive Online Dataset & Video Streaming Endpoints
 # =========================================================================== #
 @app.get("/api/vdata/gdrive/status")
 async def api_vdata_gdrive_status():
-    """Returns the current status of Google Drive synchronization, folder ID, and file catalog."""
+    """Returns the current status of Google Drive online dataset, folder ID, and video catalog."""
     return gdrive_sync_manager.get_status()
+
+
+@app.get("/api/vdata/gdrive/videos")
+async def api_vdata_gdrive_videos():
+    """Returns the remote Google Drive video catalog with online playback URLs."""
+    videos = gdrive_sync_manager.list_remote_videos()
+    return {
+        "videos": videos,
+        "count": len(videos),
+        "online_count": len([v for v in videos if v.get("status") == "online"]),
+        "local_count": len([v for v in videos if v.get("exists_locally")]),
+    }
 
 
 @app.post("/api/vdata/gdrive/list")
 async def api_vdata_gdrive_list(payload: dict = Body(default_factory=dict)):
-    """Lists files in the Google Drive folder without downloading them."""
+    """Scans the Google Drive folder and returns updated catalog of online videos."""
     folder_url = payload.get("folder_url")
-    files = gdrive_sync_manager.list_remote_files(folder_url)
-    return {"status": "ok", "files": files, "count": len(files)}
+    videos = gdrive_sync_manager.list_remote_videos(folder_url_or_id=folder_url, force_refresh=True)
+    return {
+        "status": "ok",
+        "videos": videos,
+        "files": videos,
+        "count": len(videos),
+    }
 
 
-@app.post("/api/vdata/gdrive/sync")
-async def api_vdata_gdrive_sync(payload: dict = Body(default_factory=dict)):
-    """Starts background synchronization of reference videos from Google Drive into vdata/."""
-    folder_url = payload.get("folder_url")
-    force = bool(payload.get("force", False))
-    result = gdrive_sync_manager.start_sync(folder_url_or_id=folder_url, force=force)
-    return result
+@app.get("/api/vdata/gdrive/video/{file_id}")
+async def api_vdata_gdrive_video_stream(file_id: str, request: Request):
+    """
+    Streams Google Drive reference video to browser with full HTTP Range request support (206 Partial Content).
+    Zero permanent files written to disk; zero full-file RAM buffering. Enables seamless seeking in HTML5 <video>.
+    """
+    range_header = request.headers.get("Range")
+    try:
+        stream_gen, headers, status_code = gdrive_sync_manager.get_stream_response(
+            file_id=file_id, range_header=range_header
+        )
+    except PermissionError as perm_err:
+        logger.warning("Access denied streaming file %s: %s", file_id, perm_err)
+        raise HTTPException(status_code=403, detail=str(perm_err))
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err))
+    except Exception as exc:
+        logger.error("Failed to stream Google Drive video %s: %s", file_id, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Google Drive streaming error: {str(exc)}")
+
+    return StreamingResponse(
+        stream_gen,
+        status_code=status_code,
+        headers=headers,
+        media_type="video/mp4",
+    )
 
 
 @app.post("/api/vdata/gdrive/pull_file")
 async def api_vdata_gdrive_pull_file(payload: dict = Body(...)):
-    """Downloads a single video file by Google Drive file ID into vdata/."""
+    """Downloads a single video file for offline development use only (secondary action)."""
     file_id = payload.get("file_id")
     file_name = payload.get("file_name")
     if not file_id or not file_name:

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Camera, Settings, RefreshCw, QrCode, ExternalLink, Smartphone, Cloud } from 'lucide-react';
+import { Camera, Settings, RefreshCw, QrCode, ExternalLink, Smartphone, Cloud, Play, X } from 'lucide-react';
 import CameraSourceSelector, { type CameraSourceType } from './CameraSourceSelector';
 import IPWebcamConfig from './IPWebcamConfig';
 import CameraConnectionStatus from './CameraConnectionStatus';
@@ -36,9 +36,11 @@ export default function CameraControlPanel({
   const [isExpanded, setIsExpanded] = useState(true);
   const [showQrModal, setShowQrModal] = useState(false);
   const [vdataVideos, setVdataVideos] = useState<any[]>([]);
+  const [gdriveVideos, setGdriveVideos] = useState<any[]>([]);
+  const [previewVideo, setPreviewVideo] = useState<{ name: string; url: string } | null>(null);
   const [syncingDrive, setSyncingDrive] = useState(false);
 
-  const loadVdataVideos = () => {
+  const loadVideos = () => {
     fetch(`${BACKEND_BASE}/api/vdata/videos`)
       .then((res) => res.json())
       .then((data) => {
@@ -46,29 +48,36 @@ export default function CameraControlPanel({
           setVdataVideos(data);
         }
       })
-      .catch((err) => console.error('Failed to load vdata videos in control panel:', err));
+      .catch((err) => console.warn('Failed to load vdata videos in control panel:', err));
+
+    fetch(`${BACKEND_BASE}/api/vdata/gdrive/videos`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data.videos) && data.videos.length > 0) {
+          setGdriveVideos(data.videos);
+        }
+      })
+      .catch((err) => console.warn('Failed to load gdrive videos in control panel:', err));
   };
 
-  // Fetch available vdata videos
+  // Fetch available videos on mount
   useEffect(() => {
-    loadVdataVideos();
+    loadVideos();
   }, []);
 
-  const handleQuickDriveSync = async () => {
+  const handleQuickDriveScan = async () => {
     setSyncingDrive(true);
     try {
-      await fetch(`${BACKEND_BASE}/api/vdata/gdrive/sync`, {
+      await fetch(`${BACKEND_BASE}/api/vdata/gdrive/list`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      // Refresh video list after a moment
-      setTimeout(loadVdataVideos, 2500);
-      setTimeout(loadVdataVideos, 6000);
+      loadVideos();
     } catch (e) {
-      console.error('Failed to trigger Drive sync:', e);
+      console.error('Failed to scan Drive videos:', e);
     } finally {
-      setTimeout(() => setSyncingDrive(false), 3000);
+      setTimeout(() => setSyncingDrive(false), 1200);
     }
   };
 
@@ -289,43 +298,68 @@ export default function CameraControlPanel({
               </div>
               <div className="flex items-center gap-2">
                 <select
-                  value={status.url?.replace(/\\/g, '/').split('/').pop() || '20260905_145858.mp4'}
-                  onChange={(e) => handleSourceChange('video_file', `vdata/${e.target.value}`)}
+                  value={status.url || (gdriveVideos[0]?.playbackUrl || 'vdata/20260905_145858.mp4')}
+                  onChange={(e) => handleSourceChange('video_file', e.target.value)}
                   disabled={loading}
                   className="flex-1 bg-space-950 border border-space-600 text-space-100 text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-accent-cyan"
                 >
-                  {vdataVideos.length > 0 ? (
-                    vdataVideos.map((v, idx) => (
-                      <option key={v.filename} value={v.filename}>
-                        {v.filename} {v.duration_seconds ? `(Trial ${idx + 1} · ${v.duration_seconds}s)` : `(Video ${idx + 1})`}
-                      </option>
-                    ))
-                  ) : (
-                    <>
-                      <option value="20260905_145858.mp4">20260905_145858.mp4 (Yellow & Blue Box Trial 1)</option>
-                      <option value="20260905_145948.mp4">20260905_145948.mp4 (Yellow & Blue Box Trial 2)</option>
-                      <option value="20260905_150132.mp4">20260905_150132.mp4 (Yellow & Blue Box Trial 3)</option>
-                      <option value="20260908_135006.mp4">20260908_135006.mp4 (Trial 4)</option>
-                    </>
+                  {gdriveVideos.length > 0 && (
+                    <optgroup label="GOOGLE DRIVE (ONLINE STREAM)">
+                      {gdriveVideos.map((v) => (
+                        <option key={v.id} value={v.playbackUrl}>
+                          {v.name} ({v.size_mb} MB · Online Stream)
+                        </option>
+                      ))}
+                    </optgroup>
                   )}
+                  <optgroup label="LOCAL STORAGE (VDATA/)">
+                    {vdataVideos.length > 0 ? (
+                      vdataVideos.map((v, idx) => (
+                        <option key={v.filename} value={`vdata/${v.filename}`}>
+                          {v.filename} {v.duration_seconds ? `(Trial ${idx + 1} · ${v.duration_seconds}s)` : `(Video ${idx + 1})`}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="vdata/20260905_145858.mp4">20260905_145858.mp4 (Local Trial 1)</option>
+                        <option value="vdata/20260905_145948.mp4">20260905_145948.mp4 (Local Trial 2)</option>
+                        <option value="vdata/20260905_150132.mp4">20260905_150132.mp4 (Local Trial 3)</option>
+                        <option value="vdata/20260908_135006.mp4">20260908_135006.mp4 (Local Trial 4)</option>
+                      </>
+                    )}
+                  </optgroup>
                 </select>
                 <button
                   type="button"
                   disabled={loading}
-                  onClick={() => handleSourceChange('video_file', status.url || 'vdata/20260905_145858.mp4')}
-                  className="px-3 py-1.5 rounded bg-accent-cyan text-space-950 hover:bg-sky-400 font-bold text-xs"
+                  onClick={() => handleSourceChange('video_file', status.url || gdriveVideos[0]?.playbackUrl || 'vdata/20260905_145858.mp4')}
+                  className="px-2.5 py-1.5 rounded bg-accent-cyan text-space-950 hover:bg-sky-400 font-bold text-xs"
                 >
                   Replay
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    const cur = status.url || gdriveVideos[0]?.playbackUrl || '/api/vdata/gdrive/video/1k202zi-kg68lc5Nr5RR-FhW_neqEP8OW';
+                    const name = cur.split('/').pop() || 'Video';
+                    const streamUrl = cur.startsWith('/api/') ? cur : `/api/vdata/gdrive/video/1k202zi-kg68lc5Nr5RR-FhW_neqEP8OW`;
+                    setPreviewVideo({ name, url: streamUrl });
+                  }}
+                  title="Preview online video stream in player"
+                  className="px-2.5 py-1.5 rounded bg-space-800 hover:bg-space-700 text-cyan-300 border border-space-600 text-xs flex items-center gap-1 font-bold"
+                >
+                  <Play size={12} className="fill-current" />
+                  <span>Preview</span>
+                </button>
+                <button
+                  type="button"
                   disabled={syncingDrive}
-                  onClick={handleQuickDriveSync}
-                  title="Synchronize latest videos from Google Drive"
+                  onClick={handleQuickDriveScan}
+                  title="Scan & refresh videos from Google Drive"
                   className="px-2.5 py-1.5 rounded bg-space-800 hover:bg-space-700 text-accent-cyan border border-space-600 text-xs flex items-center gap-1 font-bold disabled:opacity-50"
                 >
                   <Cloud size={13} className={syncingDrive ? 'animate-pulse' : ''} />
-                  <span>{syncingDrive ? 'Syncing...' : 'Drive Sync'}</span>
+                  <span>{syncingDrive ? 'Scanning...' : 'Drive'}</span>
                 </button>
               </div>
               {status.total_frames ? (
@@ -336,6 +370,41 @@ export default function CameraControlPanel({
               ) : null}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Online Video Stream Preview Modal */}
+      {previewVideo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="bg-[#0b1019] border border-cyan-500/50 rounded-xl max-w-2xl w-full p-4 space-y-3 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-space-700 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="p-1 rounded bg-cyan-950 text-cyan-400">
+                  <Play size={14} className="fill-current" />
+                </span>
+                <span className="font-mono text-xs font-bold text-white truncate">{previewVideo.name}</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-700">
+                  Streaming from Google Drive
+                </span>
+              </div>
+              <button
+                onClick={() => setPreviewVideo(null)}
+                className="text-slate-400 hover:text-white p-1 rounded hover:bg-space-800"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="relative aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center">
+              <video
+                controls
+                autoPlay
+                preload="metadata"
+                playsInline
+                src={`${BACKEND_BASE}${previewVideo.url}`}
+                className="w-full h-full object-contain"
+              />
+            </div>
+          </div>
         </div>
       )}
 

@@ -56,7 +56,5 @@ Thumbs.db
 .coverage
 htmlcov/
 
-# Video data & captures
-vdata/
-*.mp4
+
 
