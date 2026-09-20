@@ -1180,7 +1180,8 @@ async def control(body: dict):
         # If EXP-VDATA or source == "video_file" requested, ensure video_file is loaded
         req_source = body.get("source") or body.get("camera_source")
         req_video_path = body.get("video_path") or body.get("path")
-        is_vdata = (bool(req_exp_id) and "vdata" in req_exp_id.lower()) or (req_source == "video_file") or bool(req_video_path)
+        is_microbe = bool(req_exp_id) and ("microbe" in req_exp_id.lower())
+        is_vdata = not is_microbe and ((bool(req_exp_id) and "vdata" in req_exp_id.lower()) or (req_source == "video_file") or bool(req_video_path))
         if is_vdata and _state.camera_manager:
             vpath = req_video_path or "vdata/20260905_145858.mp4"
             loop = bool(body.get("loop", True))
@@ -1192,6 +1193,10 @@ async def control(body: dict):
             _state._video_reconnect_attempts = 0
             _state._video_last_reconnect_at = 0.0
             _state.source_play_state = "STARTING"
+        elif is_microbe and _state.camera_manager:
+            if _state.camera_manager.active_source == "video_file":
+                _state.camera_manager.disconnect()
+            _state.mode = "live_camera"
 
         if _state.state_manager:
             _state.state_manager.reset()
@@ -1606,10 +1611,24 @@ async def api_experiments():
         "protocol": "13 STEPS",
         "video_source": "vdata/20260905_145858.mp4",
     }
+    microbe_exp = {
+        "id": "EXP-MICROBE",
+        "name": "Microbial Experiment in Microgravity",
+        "category": "Biological Research",
+        "context": "ISRO–Axiom-4 Biological Research",
+        "mode": "Ground-Based Demonstration",
+        "description": "Ground-based demonstration of an observation and monitoring workflow inspired by space-related microbial biological research.",
+        "total_steps": 7,
+        "status": "READY",
+        "protocol": "07 STEPS",
+    }
     existing_ids = {e.get("id") for e in exps}
+    res = list(exps)
     if "EXP-VDATA" not in existing_ids:
-        return [vdata_exp] + exps
-    return exps
+        res.insert(0, vdata_exp)
+    if "EXP-MICROBE" not in existing_ids:
+        res.append(microbe_exp)
+    return res
 
 
 @app.post("/api/experiments")
@@ -1634,9 +1653,31 @@ async def api_get_experiment(id: str):
             "status": "READY",
             "total_steps": 13,
         }
+    elif not exp and (id == "EXP-MICROBE" or "microbe" in id.lower()):
+        exp = {
+            "id": "EXP-MICROBE",
+            "name": "Microbial Experiment in Microgravity",
+            "category": "Biological Research",
+            "context": "ISRO–Axiom-4 Biological Research",
+            "mode": "Ground-Based Demonstration",
+            "description": "Ground-based demonstration of an observation and monitoring workflow inspired by space-related microbial biological research.",
+            "objective": "Study/observe microbial experiment behavior and demonstrate automated experiment monitoring.",
+            "status": "READY",
+            "total_steps": 7,
+        }
     if not exp:
         raise HTTPException(status_code=404, detail=f"Experiment '{id}' not found")
     steps = _state.db.get_steps(id)
+    if not steps and (id == "EXP-MICROBE" or "microbe" in id.lower()):
+        steps = [
+            {"id": 1, "step_number": 1, "action": "PREPARE_SETUP", "description": "Prepare Experiment Setup", "label": "Prepare Experiment Setup", "expected_object": "Work surface"},
+            {"id": 2, "step_number": 2, "action": "PREPARE_SAMPLE", "description": "Prepare Microbial Sample", "label": "Prepare Microbial Sample", "expected_object": "Sample container"},
+            {"id": 3, "step_number": 3, "action": "TRANSFER_SAMPLE", "description": "Transfer Sample", "label": "Transfer Sample", "expected_object": "Transfer tool / pipette"},
+            {"id": 4, "step_number": 4, "action": "SECURE_CONTAINER", "description": "Secure Experiment Container", "label": "Secure Experiment Container", "expected_object": "Experiment container"},
+            {"id": 5, "step_number": 5, "action": "BEGIN_OBSERVATION", "description": "Begin Observation", "label": "Begin Observation", "expected_object": "Observation/recording equipment"},
+            {"id": 6, "step_number": 6, "action": "RECORD_OBSERVATION", "description": "Record Observation", "label": "Record Observation", "expected_object": "Observation/recording equipment"},
+            {"id": 7, "step_number": 7, "action": "EXPERIMENT_COMPLETE", "description": "Complete Experiment", "label": "Complete Experiment", "expected_object": "ALL"},
+        ]
     events = _state.db.get_events(id, limit=50)
     activities = _state.db.get_activities(id)
     latest_result = _state.db.get_latest_result(id)
@@ -1953,17 +1994,18 @@ async def api_dataset_status():
 @app.post("/api/experiment/start")
 async def api_experiment_start(body: dict):
     """Explicit experiment start mechanism: resets FSM and arms automatic run recording & logging."""
-    experiment_id = body.get("experiment_id", "EXP001")
-    scenario_id = body.get("scenario", "A").upper()
-    req_source = body.get("source") or body.get("camera_source")
-    req_video_path = body.get("video_path") or body.get("path")
-    is_vdata = ("vdata" in experiment_id.lower()) or (req_source == "video_file") or bool(req_video_path)
+    is_microbe = "microbe" in experiment_id.lower()
+    is_vdata = not is_microbe and (("vdata" in experiment_id.lower()) or (req_source == "video_file") or bool(req_video_path))
 
     if is_vdata and _state.camera_manager:
         vpath = req_video_path or "vdata/20260905_145858.mp4"
         loop = bool(body.get("loop", True))
         _state.camera_manager.connect_video_file(vpath, loop=loop)
         _state.mode = "video_file"
+    elif is_microbe and _state.camera_manager:
+        if _state.camera_manager.active_source == "video_file":
+            _state.camera_manager.disconnect()
+        _state.mode = "live_camera"
 
     if _state.state_manager:
         _state.state_manager.reset()

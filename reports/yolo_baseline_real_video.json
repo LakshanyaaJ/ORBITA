@@ -1,0 +1,103 @@
+{
+  "timestamp": "2026-09-18 14:07:53",
+  "model_path": "E:\\VS_CODE\\Orbita\\ORBITA\\models\\orbita_yolo_detector_v4.pt",
+  "video_path": "vdata/20260905_145858.mp4",
+  "frames_processed": 300,
+  "elapsed_seconds": 278.44,
+  "avg_fps": 1.08,
+  "raw_yolo_candidate_boxes_total": 285,
+  "nms_postprocessed_boxes_total": 0,
+  "per_class_summary": {
+    "LOCATION_A": {
+      "unannotated_detection_coverage_pct": 0.0,
+      "frames_with_detection": 0,
+      "total_detections": 0,
+      "max_confidence": 0.0,
+      "mean_confidence": 0.0,
+      "median_confidence": 0.0,
+      "p95_confidence": 0.0,
+      "mean_bbox_width_px": 0.0,
+      "mean_bbox_height_px": 0.0,
+      "mean_bbox_area_px": 0.0,
+      "mean_normalized_area_pct": 0.0
+    },
+    "LOCATION_B": {
+      "unannotated_detection_coverage_pct": 0.0,
+      "frames_with_detection": 0,
+      "total_detections": 0,
+      "max_confidence": 0.0,
+      "mean_confidence": 0.0,
+      "median_confidence": 0.0,
+      "p95_confidence": 0.0,
+      "mean_bbox_width_px": 0.0,
+      "mean_bbox_height_px": 0.0,
+      "mean_bbox_area_px": 0.0,
+      "mean_normalized_area_pct": 0.0
+    },
+    "PEN": {
+      "unannotated_detection_coverage_pct": 0.0,
+      "frames_with_detection": 0,
+      "total_detections": 0,
+      "max_confidence": 0.0,
+      "mean_confidence": 0.0,
+      "median_confidence": 0.0,
+      "p95_confidence": 0.0,
+      "mean_bbox_width_px": 0.0,
+      "mean_bbox_height_px": 0.0,
+      "mean_bbox_area_px": 0.0,
+      "mean_normalized_area_pct": 0.0
+    },
+    "WATCH": {
+      "unannotated_detection_coverage_pct": 0.0,
+      "frames_with_detection": 0,
+      "total_detections": 0,
+      "max_confidence": 0.0,
+      "mean_confidence": 0.0,
+      "median_confidence": 0.0,
+      "p95_confidence": 0.0,
+      "mean_bbox_width_px": 0.0,
+      "mean_bbox_height_px": 0.0,
+      "mean_bbox_area_px": 0.0,
+      "mean_normalized_area_pct": 0.0
+    },
+    "BLUE_BOX": {
+      "unannotated_detection_coverage_pct": 0.0,
+      "frames_with_detection": 0,
+      "total_detections": 0,
+      "max_confidence": 0.0,
+      "mean_confidence": 0.0,
+      "median_confidence": 0.0,
+      "p95_confidence": 0.0,
+      "mean_bbox_width_px": 0.0,
+      "mean_bbox_height_px": 0.0,
+      "mean_bbox_area_px": 0.0,
+      "mean_normalized_area_pct": 0.0
+    },
+    "YELLOW_BOX": {
+      "unannotated_detection_coverage_pct": 0.0,
+      "frames_with_detection": 0,
+      "total_detections": 0,
+      "max_confidence": 0.0,
+      "mean_confidence": 0.0,
+      "median_confidence": 0.0,
+      "p95_confidence": 0.0,
+      "mean_bbox_width_px": 0.0,
+      "mean_bbox_height_px": 0.0,
+      "mean_bbox_area_px": 0.0,
+      "mean_normalized_area_pct": 0.0
+    },
+    "HAND": {
+      "unannotated_detection_coverage_pct": 0.0,
+      "frames_with_detection": 0,
+      "total_detections": 0,
+      "max_confidence": 0.0,
+      "mean_confidence": 0.0,
+      "median_confidence": 0.0,
+      "p95_confidence": 0.0,
+      "mean_bbox_width_px": 0.0,
+      "mean_bbox_height_px": 0.0,
+      "mean_bbox_area_px": 0.0,
+      "mean_normalized_area_pct": 0.0
+    }
+  }
+}

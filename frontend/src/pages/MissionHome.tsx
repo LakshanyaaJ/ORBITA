@@ -159,6 +159,16 @@ export default function MissionHome() {
               onClick={() => navigate('/experiments/EXP-01/briefing')}
             />
             <ExperimentCard 
+              id="EXP-MICROBE" 
+              name="MICROBIAL EXPERIMENT IN MICROGRAVITY" 
+              payload="ISRO–AXIOM-4 CONTEXT"
+              steps={7} 
+              status="READY"
+              description="Ground-based demonstration of an observation and monitoring workflow inspired by space-related microbial biological research."
+              nextAction="Step 01 Prepare Experiment Setup"
+              onClick={() => navigate('/experiments/EXP-MICROBE/briefing')}
+            />
+            <ExperimentCard 
               id="EXP-02" 
               name="SAMPLE ANALYSIS" 
               payload="BIO-CHAMBER 02"

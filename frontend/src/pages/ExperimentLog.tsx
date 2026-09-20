@@ -3,15 +3,27 @@ import { Download, CheckCircle, AlertTriangle } from 'lucide-react';
 
 export default function ExperimentLog() {
   const { id } = useParams();
+  const isMicrobe = id === 'EXP-MICROBE' || id === 'EXP-MICROBIAL' || (Boolean(id) && id!.toLowerCase().includes('microbe'));
+
+  const microbeLogs = [
+    { time: '14:20:10', step: '01', name: 'PREPARE EXPERIMENT SETUP', status: 'COMPLETED', type: 'success' },
+    { time: '14:21:45', step: '02', name: 'PREPARE MICROBIAL SAMPLE', status: 'COMPLETED', type: 'success' },
+    { time: '14:23:12', step: '03', name: 'TRANSFER SAMPLE', status: 'COMPLETED', type: 'success' },
+    { time: '14:24:30', step: '04', name: 'SECURE EXPERIMENT CONTAINER', status: 'COMPLETED', type: 'success' },
+    { time: '14:25:55', step: '05', name: 'BEGIN OBSERVATION', status: 'COMPLETED', type: 'success' },
+    { time: '14:27:10', step: '06', name: 'RECORD OBSERVATION', status: 'COMPLETED', type: 'success' },
+    { time: '14:28:00', step: '07', name: 'COMPLETE EXPERIMENT', status: 'COMPLETED', type: 'success' },
+  ];
   
-  // Dummy data representing logs
-  const logs = [
+  const defaultLogs = [
     { time: '14:21:02', step: '01', name: 'PREPARE CONTAINER', status: 'COMPLETED', type: 'success' },
     { time: '14:22:18', step: '02', name: 'ADD WATER', status: 'COMPLETED', type: 'success' },
     { time: '14:24:43', step: '03', name: 'ADD SEEDS', status: 'COMPLETED', type: 'success' },
     { time: '14:26:10', step: '04', name: 'CLOSE CONTAINER', status: 'UNEXPECTED ACTION', type: 'warning' },
     { time: '14:26:18', step: '04', name: 'CLOSE CONTAINER', status: 'COMPLETED', type: 'success' },
   ];
+
+  const logs = isMicrobe ? microbeLogs : defaultLogs;
 
   return (
     <div className="p-8 max-w-4xl mx-auto h-full flex flex-col">
@@ -20,7 +32,7 @@ export default function ExperimentLog() {
           <h1 className="text-2xl font-bold font-mono tracking-widest text-space-100 mb-1">
             EXPERIMENT LOG
           </h1>
-          <div className="font-mono text-accent-cyan tracking-widest">{id || 'EXP-04'}</div>
+          <div className="font-mono text-accent-cyan tracking-widest">{id || 'EXP-01'}</div>
         </div>
         <button className="flex items-center gap-2 px-4 py-2 bg-space-800 border border-space-600 hover:border-space-400 rounded transition-colors text-sm font-mono tracking-widest">
           <Download size={16} />

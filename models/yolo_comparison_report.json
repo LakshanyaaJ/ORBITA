@@ -1,0 +1,38 @@
+{
+  "yolov8": {
+    "model_path": "models/orbita_yolov8_backup.pt",
+    "mAP50": 0.7032,
+    "mAP50-95": 0.441,
+    "precision": 0.7759,
+    "recall": 0.6796,
+    "fps": 0.5,
+    "latency_ms": 2047.27,
+    "model_size_mb": 23.33,
+    "per_class_ap50": {
+      "PERSON": 0.915,
+      "MAIN_BOX": 0.9142799070847851,
+      "RED_BOX": 0.8973106376967139,
+      "YELLOW_BOX": 0.9140697674418605,
+      "SAMPLE": 0.29328148680558885,
+      "TOOL": 0.2854425411308976
+    }
+  },
+  "yolo11": {
+    "model_path": "models/orbita_yolo_detector_v4.pt",
+    "mAP50": 0.0042,
+    "mAP50-95": 0.0005,
+    "precision": 0.0034,
+    "recall": 0.1,
+    "fps": 0.2,
+    "latency_ms": 4023.25,
+    "model_size_mb": 5.96,
+    "per_class_ap50": {
+      "LOCATION_A": 0.025096126633437355,
+      "LOCATION_B": 0.0,
+      "PEN": 0.0002755511022044088,
+      "WATCH": 0.0,
+      "BLUE_BOX": 0.0,
+      "YELLOW_BOX": 0.0
+    }
+  }
+}

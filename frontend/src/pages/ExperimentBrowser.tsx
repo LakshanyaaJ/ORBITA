@@ -95,36 +95,50 @@ export default function ExperimentBrowser() {
           </div>
         </div>
 
-        {/* EXP-02 */}
-        <div className="bg-space-800 border border-space-600/50 rounded-lg p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 opacity-75">
+        {/* EXP-MICROBE */}
+        <div className="bg-space-800 border border-space-600 hover:border-emerald-500/80 rounded-lg p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 transition-colors shadow-lg">
           <div className="flex-1">
-            <div className="flex items-center gap-4 mb-2">
-              <span className="font-mono text-xl font-bold tracking-widest text-space-400">EXP-02</span>
-              <span className="bg-space-600 text-space-400 px-2 py-1 rounded font-mono text-xs font-bold tracking-widest">PENDING</span>
+            <div className="flex items-center gap-3 mb-2 flex-wrap">
+              <span className="font-mono text-xl font-bold tracking-widest text-emerald-400">EXP-MICROBE</span>
+              <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded font-mono text-xs font-bold tracking-widest">
+                BIOLOGICAL RESEARCH
+              </span>
+              <span className="bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded font-mono text-xs font-bold tracking-widest">
+                ISRO–AXIOM-4 CONTEXT
+              </span>
+              <span className="bg-status-success/20 text-status-success px-2 py-0.5 rounded font-mono text-xs font-bold tracking-widest">
+                READY
+              </span>
             </div>
-            <h3 className="font-bold text-2xl text-space-100 mb-2">SAMPLE ANALYSIS</h3>
-            <p className="text-space-400 text-sm max-w-2xl">
-              Routine chemical analysis of atmospheric samples using standard spectroscopy interfaces.
+            <h3 className="font-bold text-2xl text-space-100 mb-2">MICROBIAL EXPERIMENT IN MICROGRAVITY</h3>
+            <p className="text-space-400 text-sm max-w-2xl leading-relaxed">
+              Ground-based demonstration of an observation and monitoring workflow inspired by space-related microbial biological research under computer vision copilot guidance.
             </p>
           </div>
           
           <div className="flex items-center gap-8 border-l border-space-600 pl-8">
             <div className="text-right font-mono">
               <div className="text-space-400 text-xs tracking-widest">PROTOCOL</div>
-              <div className="text-space-100 font-bold">05 STEPS</div>
+              <div className="text-space-100 font-bold">07 STEPS</div>
             </div>
             <div className="text-right font-mono">
-              <div className="text-space-400 text-xs tracking-widest">CAMERA</div>
-              <div className="text-space-400 font-bold">OFFLINE</div>
+              <div className="text-space-400 text-xs tracking-widest">MODE</div>
+              <div className="text-emerald-400 font-bold">DEMO</div>
             </div>
           </div>
 
           <div className="flex flex-col gap-3 ml-8">
-            <button disabled className="px-6 py-3 bg-space-700/50 text-space-400 font-mono font-bold tracking-widest rounded-md cursor-not-allowed">
+            <button 
+              onClick={() => navigate('/experiments/EXP-MICROBE/briefing')}
+              className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-space-950 font-mono font-bold tracking-widest rounded-md transition-colors shadow-md"
+            >
               START
             </button>
-            <button className="px-6 py-3 bg-space-700 text-space-100 font-mono font-bold tracking-widest rounded-md hover:bg-space-600 transition-colors">
-              VIEW
+            <button 
+              onClick={() => navigate('/experiments/EXP-MICROBE/briefing')}
+              className="px-6 py-3 bg-space-700 text-space-100 font-mono font-bold tracking-widest rounded-md hover:bg-space-600 transition-colors"
+            >
+              BRIEFING
             </button>
           </div>
         </div>

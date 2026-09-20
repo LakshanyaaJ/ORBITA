@@ -13,8 +13,9 @@ export default function ExperimentBriefing() {
   const [useReferenceVideo, setUseReferenceVideo] = useState(true);
 
   const isVData = id === 'EXP-VDATA' || (id && id.toLowerCase().includes('vdata'));
-  const isYellowBlueBox = !isVData && (!id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04');
-  const isSampleAnalysis = !isVData && (id === 'EXP-02' || id === 'EXP-2' || id === 'EXP-07');
+  const isMicrobe = !isVData && (id === 'EXP-MICROBE' || id === 'EXP-MICROBIAL' || (id && id.toLowerCase().includes('microbe')));
+  const isYellowBlueBox = !isVData && !isMicrobe && (!id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04');
+  const isSampleAnalysis = !isVData && !isMicrobe && (id === 'EXP-02' || id === 'EXP-2' || id === 'EXP-07');
 
   useEffect(() => {
     if (isVData || isYellowBlueBox) {
@@ -31,7 +32,7 @@ export default function ExperimentBriefing() {
 
   const handleStart = async () => {
     setIsStarting(true);
-    if (isVData || useReferenceVideo) {
+    if ((isVData || (isYellowBlueBox && useReferenceVideo)) && !isMicrobe) {
       try {
         await connectCamera({
           source: 'video_file',
@@ -43,11 +44,19 @@ export default function ExperimentBriefing() {
         console.error('Failed to pre-connect video:', e);
       }
     }
-    const query = (isVData || useReferenceVideo) ? `?video=${selectedVideo}` : '';
-    navigate(`/experiments/${id || (isVData ? 'EXP-VDATA' : 'EXP-01')}/live${query}`);
+    const query = (isVData || (isYellowBlueBox && useReferenceVideo)) && !isMicrobe ? `?video=${selectedVideo}` : '';
+    navigate(`/experiments/${id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01')}/live${query}`);
   };
 
-  const stepsList = (isVData || isYellowBlueBox) ? [
+  const stepsList = isMicrobe ? [
+    { num: '01', text: 'PREPARE EXPERIMENT SETUP' },
+    { num: '02', text: 'PREPARE MICROBIAL SAMPLE' },
+    { num: '03', text: 'TRANSFER SAMPLE' },
+    { num: '04', text: 'SECURE EXPERIMENT CONTAINER' },
+    { num: '05', text: 'BEGIN OBSERVATION' },
+    { num: '06', text: 'RECORD OBSERVATION' },
+    { num: '07', text: 'COMPLETE EXPERIMENT' },
+  ] : (isVData || isYellowBlueBox) ? [
     { num: '01', text: 'IDENTIFY BLUE BOX' },
     { num: '02', text: 'PICK UP BLUE BOX' },
     { num: '03', text: 'PLACE BLUE BOX AT LOCATION A' },
@@ -70,7 +79,9 @@ export default function ExperimentBriefing() {
     <div className="p-8 max-w-4xl mx-auto flex flex-col h-full">
       <div className="mb-8">
         <h1 className="text-3xl font-bold font-mono tracking-widest text-space-100 mb-2">
-          {isVData
+          {isMicrobe
+            ? 'MICROBIAL EXPERIMENT IN MICROGRAVITY'
+            : isVData
             ? 'BLUE AND YELLOW BOX VDATA'
             : isYellowBlueBox
             ? 'YELLOW AND BLUE BOX'
@@ -78,8 +89,18 @@ export default function ExperimentBriefing() {
             ? 'SAMPLE ANALYSIS'
             : 'UNKNOWN EXPERIMENT'}
         </h1>
-        <div className="flex items-center gap-3 font-mono text-accent-cyan tracking-widest text-sm">
-          <span>{id || (isVData ? 'EXP-VDATA' : 'EXP-01')}</span>
+        <div className="flex items-center gap-3 font-mono text-accent-cyan tracking-widest text-sm flex-wrap">
+          <span>{id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01')}</span>
+          {isMicrobe && (
+            <>
+              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
+                CONTEXT: ISRO–AXIOM-4 BIOLOGICAL RESEARCH
+              </span>
+              <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 text-xs font-bold">
+                MODE: GROUND-BASED DEMONSTRATION
+              </span>
+            </>
+          )}
           {isVData && (
             <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-accent-cyan border border-accent-cyan/40 text-xs font-bold">
               REFERENCE VIDEO TELEMETRY
@@ -92,16 +113,27 @@ export default function ExperimentBriefing() {
         <div className="space-y-8">
           <section>
             <h2 className="font-mono text-space-400 tracking-widest text-sm font-bold border-b border-space-600 pb-2 mb-4">
-              OBJECTIVE
+              OBJECTIVES & DEMONSTRATION GOALS
             </h2>
-            <p className="text-space-100 leading-relaxed text-sm">
-              {isVData
+            <p className="text-space-100 leading-relaxed text-sm mb-4">
+              {isMicrobe
+                ? 'Ground-based demonstration of an observation and monitoring workflow inspired by space-related microbial biological research under computer vision copilot guidance.'
+                : isVData
                 ? 'Autonomous step-by-step procedural validation of Yellow and Blue Box experiment from reference video telemetry in vdata/. Proves that the ORBITA perception, interaction, and reasoning pipeline correctly identifies objects, tracks hands, and validates all 13 physical steps in real time directly from recorded experiment video.'
                 : 'Autonomous identification, manipulation, and placement validation of Yellow Box and Blue Box physical assets. Validates procedural order, object classification, and spatial placement under computer vision copilot guidance.'}
             </p>
+            {isMicrobe && (
+              <ol className="list-decimal list-inside space-y-2 font-mono text-xs text-space-200 bg-space-850/60 p-4 rounded-lg border border-space-700">
+                <li>Observe microbial experiment activities.</li>
+                <li>Monitor the sequence of experimental actions.</li>
+                <li>Demonstrate automated observation and procedure monitoring.</li>
+                <li>Record experiment events and timestamps.</li>
+                <li>Demonstrate how ORBITA can support biological experiment workflows relevant to future space research.</li>
+              </ol>
+            )}
           </section>
 
-          {(isVData || isYellowBlueBox) && (
+          {(isVData || isYellowBlueBox) && !isMicrobe && (
             <section>
               <h2 className="font-mono text-space-400 tracking-widest text-sm font-bold border-b border-space-600 pb-2 mb-4 flex items-center gap-2">
                 <Film size={16} className="text-accent-cyan" />
@@ -165,10 +197,10 @@ export default function ExperimentBriefing() {
 
           <section>
             <h2 className="font-mono text-space-400 tracking-widest text-sm font-bold border-b border-space-600 pb-2 mb-4">
-              PROTOCOL
+              PROTOCOL STEPS
             </h2>
             <div className="font-mono text-2xl font-bold text-space-100 mb-4">
-              {(isVData || isYellowBlueBox) ? '13 STEPS' : '02 STEPS'}
+              {isMicrobe ? '07 STEPS' : (isVData || isYellowBlueBox) ? '13 STEPS' : '02 STEPS'}
             </div>
             <ul className="space-y-2.5 font-mono text-xs max-h-64 overflow-y-auto pr-2">
               {stepsList.map((step) => (
@@ -184,17 +216,30 @@ export default function ExperimentBriefing() {
         <div className="space-y-8">
           <section>
             <h2 className="font-mono text-space-400 tracking-widest text-sm font-bold border-b border-space-600 pb-2 mb-4">
-              REQUIRED EQUIPMENT
+              EXPECTED COMPONENTS & ASSETS
             </h2>
             <div className="grid grid-cols-2 gap-4">
-              <EquipmentItem name="BLUE BOX" />
-              <EquipmentItem name="YELLOW BOX" />
-              <EquipmentItem name="LOCATION A" />
-              <EquipmentItem name="LOCATION B" />
-              {isVData && (
+              {isMicrobe ? (
                 <>
-                  <EquipmentItem name="PEN" />
-                  <EquipmentItem name="WATCH" />
+                  <EquipmentItem name="EXPERIMENT CONTAINER" />
+                  <EquipmentItem name="SAMPLE CONTAINER" />
+                  <EquipmentItem name="MICROBIAL SAMPLE" />
+                  <EquipmentItem name="TRANSFER TOOL / PIPETTE" unavailable />
+                  <EquipmentItem name="OBSERVATION EQUIPMENT" />
+                  <EquipmentItem name="WORK SURFACE" />
+                </>
+              ) : (
+                <>
+                  <EquipmentItem name="BLUE BOX" />
+                  <EquipmentItem name="YELLOW BOX" />
+                  <EquipmentItem name="LOCATION A" />
+                  <EquipmentItem name="LOCATION B" />
+                  {isVData && (
+                    <>
+                      <EquipmentItem name="PEN" />
+                      <EquipmentItem name="WATCH" />
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -220,7 +265,19 @@ export default function ExperimentBriefing() {
             </div>
           </section>
 
-          <div className="pt-4">
+          {isMicrobe && (
+            <div className="p-4 bg-amber-950/40 border border-amber-600/60 rounded-lg text-amber-200 font-mono text-xs leading-relaxed space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-amber-300">
+                <AlertTriangle size={15} />
+                <span>IMPORTANT DEMONSTRATION NOTE</span>
+              </div>
+              <p>
+                College demonstration for workflow visualization only. This setup does not reproduce the microgravity environment or constitute the official ISRO/Axiom-4 experimental protocol.
+              </p>
+            </div>
+          )}
+
+          <div className="pt-2">
             <button 
               onClick={handleStart}
               disabled={isStarting}
@@ -242,10 +299,15 @@ export default function ExperimentBriefing() {
   );
 }
 
-function EquipmentItem({ name }: { name: string }) {
+function EquipmentItem({ name, unavailable }: { name: string; unavailable?: boolean }) {
   return (
-    <div className="bg-space-800 border border-space-600 p-3 rounded text-center font-mono text-xs tracking-widest text-space-100">
-      {name}
+    <div className="bg-space-800 border border-space-600 p-3 rounded text-center font-mono text-xs tracking-widest text-space-100 flex flex-col items-center justify-center gap-1">
+      <span>{name}</span>
+      {unavailable && (
+        <span className="text-[9px] text-amber-400 font-bold bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-700/60">
+          visual_validation: unavailable
+        </span>
+      )}
     </div>
   );
 }

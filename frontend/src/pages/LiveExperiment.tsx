@@ -49,19 +49,32 @@ const OFFICIAL_13_STEPS = [
   { id: 13, action: "EXPERIMENT_COMPLETE", label: "Experiment Complete", expected_object: "ALL" },
 ];
 
+const MICROBE_7_STEPS = [
+  { id: 1, action: "PREPARE_SETUP", label: "Prepare Experiment Setup", expected_object: "Work surface" },
+  { id: 2, action: "PREPARE_SAMPLE", label: "Prepare Microbial Sample", expected_object: "Sample container" },
+  { id: 3, action: "TRANSFER_SAMPLE", label: "Transfer Sample", expected_object: "Transfer tool / pipette" },
+  { id: 4, action: "SECURE_CONTAINER", label: "Secure Experiment Container", expected_object: "Experiment container" },
+  { id: 5, action: "BEGIN_OBSERVATION", label: "Begin Observation", expected_object: "Observation/recording equipment" },
+  { id: 6, action: "RECORD_OBSERVATION", label: "Record Observation", expected_object: "Observation/recording equipment" },
+  { id: 7, action: "EXPERIMENT_COMPLETE", label: "Complete Experiment", expected_object: "ALL" },
+];
+
 export default function LiveExperiment() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
-  const queryVideo = searchParams.get('video') || '20260905_145858.mp4';
+
+  const isVData = id === 'EXP-VDATA' || (Boolean(id) && id!.toLowerCase().includes('vdata'));
+  const isMicrobe = !isVData && (id === 'EXP-MICROBE' || id === 'EXP-MICROBIAL' || (Boolean(id) && id!.toLowerCase().includes('microbe')));
+
+  const queryVideo = searchParams.get('video') || (isMicrobe ? '' : '20260905_145858.mp4');
   const [currentVideo, setCurrentVideo] = useState(queryVideo);
 
-  const isVData = id === 'EXP-VDATA' || (id && id.toLowerCase().includes('vdata'));
-  const isYellowBlueBox = !isVData && (!id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04');
+  const isYellowBlueBox = !isVData && !isMicrobe && (!id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04');
   const { data, isConnected } = useTelemetry();
   const [videoError, setVideoError] = useState(false);
   const [streamVersion, setStreamVersion] = useState(Date.now());
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
-  const isVideoMode = isVData || searchParams.has('video') || cameraStatus?.source === 'video_file' || (isYellowBlueBox && (!cameraStatus?.connected || cameraStatus?.source === 'sim'));
+  const isVideoMode = (isVData || searchParams.has('video') || cameraStatus?.source === 'video_file' || (isYellowBlueBox && (!cameraStatus?.connected || cameraStatus?.source === 'sim'))) && !isMicrobe;
   const [isDebugMode, setIsDebugMode] = useState(true);
   const [rotation, setRotation] = useState<number>(0);
   const [isExpandedVideo, setIsExpandedVideo] = useState<boolean>(false);
@@ -149,8 +162,10 @@ export default function LiveExperiment() {
   useEffect(() => {
     if (armedRef.current) return;
     armedRef.current = true;
-    const payload: any = { action: 'start', experiment_id: id || (isVData ? 'EXP-VDATA' : 'EXP-01') };
-    if (isVData || isVideoMode) {
+    const payload: any = { action: 'start', experiment_id: id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01') };
+    if (isMicrobe) {
+      payload.source = 'live_camera';
+    } else if (isVData || isVideoMode) {
       payload.source = 'video_file';
       payload.video_path = `vdata/${queryVideo}`;
       payload.loop = true;
@@ -220,8 +235,8 @@ export default function LiveExperiment() {
     await rotateCamera(next);
   };
 
-  const state = data || getFallbackState(id || 'EXP-01');
-  const protocolSteps = (state.steps && state.steps.length > 0) ? state.steps : OFFICIAL_13_STEPS;
+  const state = data || getFallbackState(id || (isMicrobe ? 'EXP-MICROBE' : 'EXP-01'));
+  const protocolSteps = (state.steps && state.steps.length > 0) ? state.steps : (isMicrobe ? MICROBE_7_STEPS : OFFICIAL_13_STEPS);
 
   // Derive status states
   const statusStr = (state.status || 'WAITING').toUpperCase();
@@ -711,7 +726,9 @@ export default function LiveExperiment() {
           {/* Header Card */}
           <div className="p-5 border-b border-space-800 bg-space-850/50">
             <div className="flex items-center justify-between mb-2">
-              <span className="font-mono text-xs text-space-400 tracking-wider">EXPERIMENT SUPERVISOR</span>
+              <span className="font-mono text-xs text-space-400 tracking-wider">
+                {isMicrobe ? 'MICROBIAL EXPERIMENT IN MICROGRAVITY' : 'EXPERIMENT SUPERVISOR'}
+              </span>
               <span className="font-mono text-xs px-2 py-0.5 bg-space-800 rounded text-accent-cyan border border-space-700">
                 {id || state.experiment_id || 'EXP-01'}
               </span>
@@ -1388,6 +1405,45 @@ export default function LiveExperiment() {
 
 // Fallback state for graceful offline rendering
 function getFallbackState(id: string) {
+  const isMicrobe = id === 'EXP-MICROBE' || id === 'EXP-MICROBIAL' || (Boolean(id) && id.toLowerCase().includes('microbe'));
+  if (isMicrobe) {
+    return {
+      experiment_id: 'EXP-MICROBE',
+      current_step_idx: 0,
+      total_steps: 7,
+      status: 'WAITING',
+      current_step: {
+        id: 1,
+        action: "PREPARE_SETUP",
+        label: "Prepare Experiment Setup",
+        description: "Prepare workspace for microbial observation."
+      },
+      next_step: {
+        id: 2,
+        action: "PREPARE_SAMPLE",
+        label: "Prepare Microbial Sample",
+        description: "Prepare microbial sample container."
+      },
+      completed_steps: [],
+      failed_steps: [],
+      skipped_steps: [],
+      detected_action: "IDLE",
+      detected_object: "Sample container",
+      error_type: null,
+      recovery_message: null,
+      progress_pct: 14.2,
+      elapsed_seconds: 0,
+      voice_message: "Step 1: Prepare experiment setup.",
+      hud_message: "Step 1: Prepare experiment setup.",
+      alert_level: "info",
+      fps: 30.0,
+      latency_ms: 45,
+      action_confidence: 0.92,
+      is_uncertain: false,
+      rules: [],
+      steps: MICROBE_7_STEPS,
+    } as any;
+  }
   return {
     experiment_id: id,
     current_step_idx: 0,

@@ -1,0 +1,13 @@
+# ORBITA YOLO11 Training Configuration
+model: yolo11n.pt
+data: datasets/orbita/v3/data.yaml
+imgsz: 640
+epochs: 15
+batch: 8
+device: cpu
+project: runs/orbita
+name: yolo11_experiment
+workers: 2
+patience: 10
+save: true
+exist_ok: true
