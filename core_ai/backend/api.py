@@ -1177,12 +1177,29 @@ async def control(body: dict):
                 if hasattr(_state.state_manager, "fsm"):
                     _state.state_manager.fsm.experiment_id = req_exp_id
 
-        # If EXP-VDATA or source == "video_file" requested, ensure video_file is loaded
+        # If EXP-MICROBE, EXP-VDATA or source == "video_file" requested, ensure video_file is loaded
         req_source = body.get("source") or body.get("camera_source")
         req_video_path = body.get("video_path") or body.get("path")
         is_microbe = bool(req_exp_id) and ("microbe" in req_exp_id.lower())
         is_vdata = not is_microbe and ((bool(req_exp_id) and "vdata" in req_exp_id.lower()) or (req_source == "video_file") or bool(req_video_path))
-        if is_vdata and _state.camera_manager:
+        
+        if is_microbe and _state.camera_manager:
+            vpath = req_video_path or "vdata/WhatsApp Video 2026-09-20 at 3.05.43 PM.mp4"
+            if not Path(vpath).exists():
+                vdata_dir = Path("vdata")
+                matches = list(vdata_dir.glob("*WhatsApp Video*.mp4")) or list(vdata_dir.glob("*microbe*.mp4"))
+                if matches:
+                    vpath = str(matches[0])
+            if Path(vpath).exists():
+                loop = bool(body.get("loop", True))
+                _state.camera_manager.connect_video_file(vpath, loop=loop)
+                _state.mode = "video_file"
+                _state.last_video_path = vpath
+                _state.last_video_loop = loop
+                _state._video_reconnect_attempts = 0
+                _state._video_last_reconnect_at = 0.0
+                _state.source_play_state = "STARTING"
+        elif is_vdata and _state.camera_manager:
             vpath = req_video_path or "vdata/20260905_145858.mp4"
             loop = bool(body.get("loop", True))
             _state.camera_manager.connect_video_file(vpath, loop=loop)
@@ -1193,10 +1210,6 @@ async def control(body: dict):
             _state._video_reconnect_attempts = 0
             _state._video_last_reconnect_at = 0.0
             _state.source_play_state = "STARTING"
-        elif is_microbe and _state.camera_manager:
-            if _state.camera_manager.active_source == "video_file":
-                _state.camera_manager.disconnect()
-            _state.mode = "live_camera"
 
         if _state.state_manager:
             _state.state_manager.reset()
@@ -1991,21 +2004,29 @@ async def api_dataset_status():
     }
 
 
-@app.post("/api/experiment/start")
-async def api_experiment_start(body: dict):
-    """Explicit experiment start mechanism: resets FSM and arms automatic run recording & logging."""
+    experiment_id = body.get("experiment_id", "EXP001")
+    scenario_id = body.get("scenario", "A").upper()
+    req_source = body.get("source") or body.get("camera_source")
+    req_video_path = body.get("video_path") or body.get("path")
     is_microbe = "microbe" in experiment_id.lower()
     is_vdata = not is_microbe and (("vdata" in experiment_id.lower()) or (req_source == "video_file") or bool(req_video_path))
 
-    if is_vdata and _state.camera_manager:
+    if is_microbe and _state.camera_manager:
+        vpath = req_video_path or "vdata/WhatsApp Video 2026-09-20 at 3.05.43 PM.mp4"
+        if not Path(vpath).exists():
+            vdata_dir = Path("vdata")
+            matches = list(vdata_dir.glob("*WhatsApp Video*.mp4")) or list(vdata_dir.glob("*microbe*.mp4"))
+            if matches:
+                vpath = str(matches[0])
+        if Path(vpath).exists():
+            loop = bool(body.get("loop", True))
+            _state.camera_manager.connect_video_file(vpath, loop=loop)
+            _state.mode = "video_file"
+    elif is_vdata and _state.camera_manager:
         vpath = req_video_path or "vdata/20260905_145858.mp4"
         loop = bool(body.get("loop", True))
         _state.camera_manager.connect_video_file(vpath, loop=loop)
         _state.mode = "video_file"
-    elif is_microbe and _state.camera_manager:
-        if _state.camera_manager.active_source == "video_file":
-            _state.camera_manager.disconnect()
-        _state.mode = "live_camera"
 
     if _state.state_manager:
         _state.state_manager.reset()

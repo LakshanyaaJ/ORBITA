@@ -6,19 +6,20 @@ import { BACKEND_BASE, connectCamera } from '../api/camera';
 export default function ExperimentBriefing() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const [selectedVideo, setSelectedVideo] = useState('20260905_145858.mp4');
-  const [availableVideos, setAvailableVideos] = useState<any[]>([]);
-  const [isStarting, setIsStarting] = useState(false);
-
-  const [useReferenceVideo, setUseReferenceVideo] = useState(true);
-
   const isVData = id === 'EXP-VDATA' || (id && id.toLowerCase().includes('vdata'));
   const isMicrobe = !isVData && (id === 'EXP-MICROBE' || id === 'EXP-MICROBIAL' || (id && id.toLowerCase().includes('microbe')));
   const isYellowBlueBox = !isVData && !isMicrobe && (!id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04');
   const isSampleAnalysis = !isVData && !isMicrobe && (id === 'EXP-02' || id === 'EXP-2' || id === 'EXP-07');
 
+  const MICROBE_DEFAULT_VIDEO = 'WhatsApp Video 2026-09-20 at 3.05.43 PM.mp4';
+  const [selectedVideo, setSelectedVideo] = useState(() => isMicrobe ? MICROBE_DEFAULT_VIDEO : '20260905_145858.mp4');
+  const [availableVideos, setAvailableVideos] = useState<any[]>([]);
+  const [isStarting, setIsStarting] = useState(false);
+
+  const [useReferenceVideo, setUseReferenceVideo] = useState(true);
+
   useEffect(() => {
-    if (isVData || isYellowBlueBox) {
+    if (isVData || isYellowBlueBox || isMicrobe) {
       fetch(`${BACKEND_BASE}/api/vdata/videos`)
         .then(res => res.json())
         .then(data => {
@@ -28,15 +29,16 @@ export default function ExperimentBriefing() {
         })
         .catch(() => {});
     }
-  }, [isVData, isYellowBlueBox]);
+  }, [isVData, isYellowBlueBox, isMicrobe]);
 
   const handleStart = async () => {
     setIsStarting(true);
-    if ((isVData || (isYellowBlueBox && useReferenceVideo)) && !isMicrobe) {
+    const targetVideo = isMicrobe ? (selectedVideo !== '20260905_145858.mp4' ? selectedVideo : MICROBE_DEFAULT_VIDEO) : selectedVideo;
+    if (isVData || isMicrobe || (isYellowBlueBox && useReferenceVideo)) {
       try {
         await connectCamera({
           source: 'video_file',
-          path: `vdata/${selectedVideo}`,
+          path: `vdata/${targetVideo}`,
           loop: true,
           reset_fsm: true,
         });
@@ -44,7 +46,7 @@ export default function ExperimentBriefing() {
         console.error('Failed to pre-connect video:', e);
       }
     }
-    const query = (isVData || (isYellowBlueBox && useReferenceVideo)) && !isMicrobe ? `?video=${selectedVideo}` : '';
+    const query = `?video=${encodeURIComponent(targetVideo)}`;
     navigate(`/experiments/${id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01')}/live${query}`);
   };
 

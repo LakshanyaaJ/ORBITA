@@ -59,6 +59,8 @@ const MICROBE_7_STEPS = [
   { id: 7, action: "EXPERIMENT_COMPLETE", label: "Complete Experiment", expected_object: "ALL" },
 ];
 
+export type VideoSourceMode = 'LIVE_CAMERA' | 'VDATA_VIDEO';
+
 export default function LiveExperiment() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -66,15 +68,24 @@ export default function LiveExperiment() {
   const isVData = id === 'EXP-VDATA' || (Boolean(id) && id!.toLowerCase().includes('vdata'));
   const isMicrobe = !isVData && (id === 'EXP-MICROBE' || id === 'EXP-MICROBIAL' || (Boolean(id) && id!.toLowerCase().includes('microbe')));
 
-  const queryVideo = searchParams.get('video') || (isMicrobe ? '' : '20260905_145858.mp4');
+  const MICROBE_DEFAULT_VIDEO = 'WhatsApp Video 2026-09-20 at 3.05.43 PM.mp4';
+  const queryVideo = searchParams.get('video') || (isMicrobe ? MICROBE_DEFAULT_VIDEO : '20260905_145858.mp4');
   const [currentVideo, setCurrentVideo] = useState(queryVideo);
+
+  // Explicit source state: LIVE_CAMERA or VDATA_VIDEO
+  const [sourceMode, setSourceMode] = useState<VideoSourceMode>(() => {
+    if (isMicrobe || isVData || searchParams.has('video') || searchParams.get('source') === 'vdata') {
+      return 'VDATA_VIDEO';
+    }
+    return 'LIVE_CAMERA';
+  });
 
   const isYellowBlueBox = !isVData && !isMicrobe && (!id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04');
   const { data, isConnected } = useTelemetry();
   const [videoError, setVideoError] = useState(false);
   const [streamVersion, setStreamVersion] = useState(Date.now());
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
-  const isVideoMode = (isVData || searchParams.has('video') || cameraStatus?.source === 'video_file' || (isYellowBlueBox && (!cameraStatus?.connected || cameraStatus?.source === 'sim'))) && !isMicrobe;
+  const isVideoMode = isMicrobe || isVData || searchParams.has('video') || cameraStatus?.source === 'video_file' || (isYellowBlueBox && (!cameraStatus?.connected || cameraStatus?.source === 'sim'));
   const [isDebugMode, setIsDebugMode] = useState(true);
   const [rotation, setRotation] = useState<number>(0);
   const [isExpandedVideo, setIsExpandedVideo] = useState<boolean>(false);
@@ -152,22 +163,27 @@ export default function LiveExperiment() {
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setAvailableVideos(data);
+          if (isMicrobe) {
+            const microbeVid = data.find((v: any) => v.filename.toLowerCase().includes('whatsapp') || v.filename.toLowerCase().includes('microbe'));
+            if (microbeVid) {
+              setCurrentVideo(microbeVid.filename);
+            }
+          }
         }
       })
       .catch((err) => console.error('Failed to load vdata videos:', err));
-  }, []);
+  }, [isMicrobe]);
 
   // Auto-arm session start on mount once so video recording, VDATA video loading, and write-through logging start synchronously
   const armedRef = useRef(false);
   useEffect(() => {
     if (armedRef.current) return;
     armedRef.current = true;
+    const targetVid = currentVideo || queryVideo || (isMicrobe ? MICROBE_DEFAULT_VIDEO : '20260905_145858.mp4');
     const payload: any = { action: 'start', experiment_id: id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01') };
-    if (isMicrobe) {
-      payload.source = 'live_camera';
-    } else if (isVData || isVideoMode) {
+    if (isMicrobe || isVData || sourceMode === 'VDATA_VIDEO' || isVideoMode) {
       payload.source = 'video_file';
-      payload.video_path = `vdata/${queryVideo}`;
+      payload.video_path = `vdata/${targetVid}`;
       payload.loop = true;
     }
     fetch(`${BACKEND_BASE}/api/control`, {
@@ -620,11 +636,29 @@ export default function LiveExperiment() {
                      cameraStatus?.source_play_state === 'STARTING' ? '◌ INIT...' :
                      cameraStatus?.source_play_state === 'STALE' ? '⚠ STALLED' : '● ACTIVE'}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setSourceMode('LIVE_CAMERA')}
+                    className="ml-1 px-2 py-0.5 rounded bg-space-800 hover:bg-space-700 text-space-400 hover:text-white border border-space-700 flex items-center gap-1 text-[10px] font-mono font-bold transition-colors"
+                    title="Switch to Live Camera Stream"
+                  >
+                    <Camera size={11} />
+                    <span>LIVE CAM</span>
+                  </button>
                 </>
               ) : (
                 <div className="flex items-center gap-2 text-[11px] text-space-300">
                   <span className="text-space-400">SOURCE:</span>
                   <span className="text-accent-cyan font-bold">{getSourceLabel()}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSourceMode('VDATA_VIDEO')}
+                    className="ml-2 px-2 py-0.5 rounded bg-space-800 hover:bg-space-700 text-accent-cyan border border-space-600 flex items-center gap-1 text-[10px] font-bold transition-colors"
+                    title="Switch to Video Reference Mode"
+                  >
+                    <Film size={11} />
+                    <span>VDATA VIDEO</span>
+                  </button>
                 </div>
               )}
             </div>
