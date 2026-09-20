@@ -150,9 +150,31 @@ class OrbitaDB:
                 );
             """)
             # Migration check for existing SQLite files
-            for col, d_val in [("objective", "''"), ("configuration", "'{}'"), ("total_steps", "0")]:
+            for table, col, d_val in [
+                ("experiments", "objective", "''"),
+                ("experiments", "configuration", "'{}'"),
+                ("experiments", "total_steps", "0"),
+                ("events", "execution_id", "''"),
+                ("events", "event_type", "''"),
+                ("events", "type", "''"),
+                ("events", "confidence", "1.0"),
+                ("events", "elapsed_time", "0.0"),
+                ("events", "step_number", "0"),
+                ("events", "total_steps", "0"),
+                ("events", "expected_action", "''"),
+                ("events", "detected_action", "''"),
+                ("events", "target_object", "''"),
+                ("events", "status", "''"),
+                ("events", "procedure_state", "''"),
+                ("events", "voice_guidance", "''"),
+                ("events", "deviation_reason", "''"),
+                ("events", "source", "''"),
+                ("events", "metadata", "''"),
+                ("events", "data_json", "''"),
+                ("step_records", "execution_id", "''"),
+            ]:
                 try:
-                    conn.execute(f"ALTER TABLE experiments ADD COLUMN {col} TEXT DEFAULT {d_val}")
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT {d_val}")
                 except Exception:
                     pass
         logger.info("Database initialized at %s with extended schema", self.db_path)
@@ -197,15 +219,16 @@ class OrbitaDB:
         detected_object: str = "",
         confidence: float = 0.0,
         latency_ms: float = 0.0,
+        execution_id: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """INSERT INTO step_records
                    (experiment_id, step_number, action, label, timestamp, status,
-                    error_type, detected_action, detected_object, confidence, latency_ms)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    error_type, detected_action, detected_object, confidence, latency_ms, execution_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (experiment_id, step_number, action, label, time.time(), status,
-                 error_type, detected_action, detected_object, confidence, latency_ms),
+                 error_type, detected_action, detected_object, confidence, latency_ms, execution_id),
             )
 
     def log_event(self, experiment_id: str, event_type: str, data: dict, confidence: float = 1.0) -> None:
@@ -216,6 +239,114 @@ class OrbitaDB:
                    VALUES (?,?,?,?,?,?,?)""",
                 (experiment_id, time.time(), event_type, event_type, confidence, json.dumps(data), json.dumps(data)),
             )
+
+    def log_structured_event(self, event_data: dict) -> None:
+        """Log a canonical ExperimentLogEvent to SQLite."""
+        with self._connect() as conn:
+            exp_id = event_data.get("experiment_id", "")
+            exec_id = event_data.get("execution_id", "")
+            ts = event_data.get("timestamp_epoch", time.time())
+            ev_type = event_data.get("event_type", "STEP_VALIDATED")
+            conf = float(event_data.get("confidence", 1.0)) if event_data.get("confidence") is not None else 1.0
+            
+            conn.execute(
+                """INSERT INTO events 
+                   (experiment_id, execution_id, timestamp, event_type, type, confidence,
+                    elapsed_time, step_number, total_steps, expected_action, detected_action,
+                    target_object, status, procedure_state, voice_guidance, deviation_reason,
+                    source, metadata, data_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    exp_id,
+                    exec_id,
+                    ts,
+                    ev_type,
+                    ev_type,
+                    conf,
+                    event_data.get("elapsed_time", 0.0),
+                    event_data.get("step_number", 0),
+                    event_data.get("total_steps", 0),
+                    event_data.get("expected_action", ""),
+                    event_data.get("detected_action", ""),
+                    event_data.get("target_object", ""),
+                    event_data.get("status", "PENDING"),
+                    event_data.get("procedure_state", ""),
+                    event_data.get("voice_guidance", ""),
+                    event_data.get("deviation_reason", ""),
+                    event_data.get("source", ""),
+                    json.dumps(event_data),
+                    json.dumps(event_data),
+                ),
+            )
+
+    def get_structured_logs(self, experiment_id: str, execution_id: Optional[str] = None) -> list[dict]:
+        """Fetch all structured experiment events for a given experiment and execution_id."""
+        with self._connect() as conn:
+            if execution_id:
+                rows = conn.execute(
+                    """SELECT * FROM events 
+                       WHERE experiment_id=? AND (execution_id=? OR execution_id IS NULL OR execution_id='') 
+                       ORDER BY timestamp ASC""",
+                    (experiment_id, execution_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM events WHERE experiment_id=? ORDER BY timestamp ASC",
+                    (experiment_id,),
+                ).fetchall()
+
+            events = []
+            for r in rows:
+                d = dict(r)
+                if isinstance(d.get("data_json"), str) and d["data_json"]:
+                    try:
+                        parsed = json.loads(d["data_json"])
+                        if isinstance(parsed, dict) and "event_type" in parsed:
+                            events.append(parsed)
+                            continue
+                    except Exception:
+                        pass
+                if isinstance(d.get("metadata"), str) and d["metadata"]:
+                    try:
+                        parsed = json.loads(d["metadata"])
+                        if isinstance(parsed, dict) and "event_type" in parsed:
+                            events.append(parsed)
+                            continue
+                    except Exception:
+                        pass
+                
+                # Fallback mapping for generic events
+                events.append({
+                    "id": d.get("id"),
+                    "experiment_id": d.get("experiment_id"),
+                    "execution_id": d.get("execution_id") or "",
+                    "timestamp": datetime.fromtimestamp(d.get("timestamp", time.time()), timezone.utc).isoformat(),
+                    "elapsed_time": d.get("elapsed_time", 0.0),
+                    "step_number": d.get("step_number", 0),
+                    "total_steps": d.get("total_steps", 0),
+                    "expected_action": d.get("expected_action") or d.get("type", ""),
+                    "detected_action": d.get("detected_action") or "",
+                    "target_object": d.get("target_object") or "",
+                    "status": d.get("status") or "VALIDATED",
+                    "procedure_state": d.get("procedure_state") or "",
+                    "confidence": d.get("confidence", 1.0),
+                    "event_type": d.get("event_type") or d.get("type", "EVENT"),
+                    "voice_guidance": d.get("voice_guidance") or "",
+                    "deviation_reason": d.get("deviation_reason") or "",
+                    "source": d.get("source") or "",
+                })
+            return events
+
+    def list_experiment_runs(self, experiment_id: str) -> list[dict]:
+        """List distinct execution runs for an experiment."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT execution_id, MIN(timestamp) as start_time, MAX(timestamp) as end_time, COUNT(*) as event_count
+                   FROM events WHERE experiment_id=? AND execution_id IS NOT NULL AND execution_id != ''
+                   GROUP BY execution_id ORDER BY start_time DESC""",
+                (experiment_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def log_observation(self, experiment_id: str, parameter: str, value: float, unit: str) -> None:
         with self._connect() as conn:

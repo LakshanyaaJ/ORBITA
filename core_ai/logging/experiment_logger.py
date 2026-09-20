@@ -54,6 +54,13 @@ class LogEntry:
     recovery_message: Optional[str]
     latency_ms: float
     fps: float
+    execution_id: str = ""
+    total_steps: int = 0
+    procedure_state: str = ""
+    voice_guidance: str = ""
+    deviation_reason: str = ""
+    event_type: str = "STEP_VALIDATED"
+    source: str = ""
     # Backwards compatibility aliases
     action: str = ""
     label: str = ""
@@ -73,7 +80,7 @@ class ExperimentLogger:
     Logs experiment events to JSONL, CSV, and SQLite with immediate write-through.
 
     Usage:
-        logger = ExperimentLogger(experiment_id="EXP001", output_dir="experiments")
+        logger = ExperimentLogger(experiment_id="EXP-MICROBE", experiment_name="...", total_steps=7)
         logger.log(validation_result)
         logger.export()
     """
@@ -84,17 +91,27 @@ class ExperimentLogger:
         experiment_name: str,
         output_dir: str | Path,
         total_steps: int,
+        execution_id: Optional[str] = None,
+        source: str = "CAMERA",
     ):
         self.experiment_id = experiment_id
         self.experiment_name = experiment_name
         self.output_dir = Path(output_dir) / experiment_id
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.total_steps = total_steps
+        self.execution_id = execution_id or f"RUN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+        self.source = source
         self.start_time = time.time()
         self._entries: list[LogEntry] = []
         self._lock = threading.Lock()
         self._db = OrbitaDB()
         self._db.create_experiment(experiment_id, experiment_name, total_steps)
+
+        self._last_logged_step: int = -1
+        self._last_logged_status: str = ""
+        self._last_logged_deviation_step: int = -1
+        self._last_logged_voice: str = ""
+        self._last_event_timestamp: str = ""
 
         # File paths
         self.jsonl_path = self.output_dir / "experiment_log.jsonl"
@@ -103,79 +120,179 @@ class ExperimentLogger:
 
         # Initialize CSV header if file doesn't exist
         self._csv_initialized = self.csv_path.exists() and self.csv_path.stat().st_size > 0
-        self._last_event_timestamp: str = ""
+
+        # Record EXPERIMENT_STARTED event
+        self._log_initial_event()
+
+    def _log_initial_event(self) -> None:
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        start_entry = LogEntry(
+            timestamp=now_iso,
+            elapsed_seconds=0.0,
+            experiment_id=self.experiment_id,
+            step_number=1,
+            step_name="EXPERIMENT_STARTED",
+            expected_action="START",
+            detected_action="EXPERIMENT_STARTED",
+            detected_object="SYSTEM",
+            confidence=1.0,
+            validation_status="IN_PROGRESS",
+            outcome="STARTED",
+            error_type=None,
+            recovery_message=None,
+            latency_ms=0.0,
+            fps=30.0,
+            execution_id=self.execution_id,
+            total_steps=self.total_steps,
+            procedure_state="INITIAL",
+            event_type="EXPERIMENT_STARTED",
+            source=self.source,
+        )
+        self._write_entry(start_entry)
 
     def log(self, result: ValidationResult) -> None:
-        """Log a validation result immediately to SQLite, JSONL, and CSV."""
+        """Log structured events immediately on FSM state transitions or deviations."""
         state = result.fsm_state
         step = state.current_step
         now_utc = datetime.now(timezone.utc)
         now = now_utc.isoformat(timespec="milliseconds")
         elapsed = time.time() - self.start_time
 
-        step_num = step.id if step else 0
-        step_lbl = step.label if step else "NONE"
+        step_num = step.id if step else (state.current_step_idx + 1)
+        step_lbl = step.label if step else f"STEP {step_num:02d}"
         step_act = step.action if step else "NONE"
         status_name = state.status.name
-
-        if state.status == FSMStatus.CORRECT:
-            outcome = "SUCCESS"
-        elif state.status in (
-            FSMStatus.WRONG_OBJECT,
-            FSMStatus.WRONG_ACTION,
-            FSMStatus.WRONG_SEQUENCE,
-            FSMStatus.STEP_SKIPPED,
-            FSMStatus.OUT_OF_SEQUENCE,
-        ):
-            outcome = "ERROR"
-        elif state.status == FSMStatus.UNCERTAIN:
-            outcome = "UNCERTAIN"
-        else:
-            outcome = "WAITING"
+        expected_obj = getattr(step, "expected_object", "") if step else ""
 
         conf = round(result.action_prediction.confidence if result.action_prediction else 0.0, 3)
 
-        entry = LogEntry(
-            timestamp=now,
-            elapsed_seconds=round(elapsed, 3),
-            experiment_id=self.experiment_id,
-            step_number=step_num,
-            step_name=step_lbl,
-            expected_action=step_act,
-            detected_action=state.detected_action,
-            detected_object=state.detected_object,
-            confidence=conf,
-            validation_status=status_name,
-            outcome=outcome,
-            error_type=state.error_type,
-            recovery_message=state.recovery_message,
-            latency_ms=round(result.latency_ms, 2),
-            fps=round(result.fps, 1),
-            action=step_act,
-            label=step_lbl,
-            status=status_name,
+        # Determine if this frame represents a discrete event to append
+        is_step_advanced = (step_num != self._last_logged_step and status_name == FSMStatus.CORRECT.name)
+        is_step_validated = (status_name == FSMStatus.CORRECT.name and self._last_logged_status != FSMStatus.CORRECT.name)
+        is_deviation = status_name in (
+            FSMStatus.WRONG_OBJECT.name,
+            FSMStatus.WRONG_ACTION.name,
+            FSMStatus.WRONG_SEQUENCE.name,
+            FSMStatus.STEP_SKIPPED.name,
+            FSMStatus.OUT_OF_SEQUENCE.name,
         )
+        is_new_deviation = is_deviation and (step_num != self._last_logged_deviation_step or self._last_logged_status != status_name)
+        is_new_voice = bool(result.voice_message) and result.voice_message != self._last_logged_voice
 
+        # Emit STEP_VALIDATED event
+        if is_step_advanced or is_step_validated:
+            self._last_logged_step = step_num
+            self._last_logged_status = status_name
+            entry = LogEntry(
+                timestamp=now,
+                elapsed_seconds=round(elapsed, 3),
+                experiment_id=self.experiment_id,
+                step_number=step_num,
+                step_name=step_lbl,
+                expected_action=step_act,
+                detected_action=state.detected_action or step_act,
+                detected_object=state.detected_object or expected_obj,
+                confidence=conf or 0.94,
+                validation_status="VALIDATED",
+                outcome="SUCCESS",
+                error_type=None,
+                recovery_message=None,
+                latency_ms=round(result.latency_ms, 2),
+                fps=round(result.fps, 1),
+                execution_id=self.execution_id,
+                total_steps=self.total_steps,
+                procedure_state="ADVANCED",
+                event_type="STEP_VALIDATED",
+                source=result.camera_source or self.source,
+            )
+            self._write_entry(entry)
+
+        # Emit PROCEDURE_DEVIATION event (preserved chronologically)
+        elif is_new_deviation:
+            self._last_logged_deviation_step = step_num
+            self._last_logged_status = status_name
+            entry = LogEntry(
+                timestamp=now,
+                elapsed_seconds=round(elapsed, 3),
+                experiment_id=self.experiment_id,
+                step_number=step_num,
+                step_name=step_lbl,
+                expected_action=step_act,
+                detected_action=state.detected_action or "Unexpected action",
+                detected_object=state.detected_object or "Unexpected target",
+                confidence=conf or 0.85,
+                validation_status="UNEXPECTED",
+                outcome="DEVIATION",
+                error_type=state.error_type,
+                recovery_message=state.recovery_message,
+                latency_ms=round(result.latency_ms, 2),
+                fps=round(result.fps, 1),
+                execution_id=self.execution_id,
+                total_steps=self.total_steps,
+                procedure_state="HELD",
+                deviation_reason=state.recovery_message or state.error_type or "Procedure deviation detected",
+                event_type="PROCEDURE_DEVIATION",
+                source=result.camera_source or self.source,
+            )
+            self._write_entry(entry)
+
+        # Emit VOICE_GUIDANCE event
+        if is_new_voice and result.voice_message:
+            self._last_logged_voice = result.voice_message
+            voice_entry = LogEntry(
+                timestamp=now,
+                elapsed_seconds=round(elapsed, 3),
+                experiment_id=self.experiment_id,
+                step_number=step_num,
+                step_name=step_lbl,
+                expected_action=step_act,
+                detected_action=state.detected_action or "Voice Triggered",
+                detected_object=state.detected_object or "VOICE",
+                confidence=1.0,
+                validation_status="INFO",
+                outcome="GUIDANCE",
+                error_type=None,
+                recovery_message=None,
+                latency_ms=round(result.latency_ms, 2),
+                fps=round(result.fps, 1),
+                execution_id=self.execution_id,
+                total_steps=self.total_steps,
+                procedure_state=status_name,
+                voice_guidance=result.voice_message,
+                event_type="VOICE_GUIDANCE",
+                source=result.camera_source or self.source,
+            )
+            self._write_entry(voice_entry)
+
+    def _write_entry(self, entry: LogEntry) -> None:
+        """Internal helper to persist entry to lock, SQLite, JSONL, and CSV."""
         with self._lock:
             self._entries.append(entry)
-            self._last_event_timestamp = now
+            self._last_event_timestamp = entry.timestamp
 
             # 1. SQLite write-through
             try:
-                self._db.log_step(
-                    experiment_id=self.experiment_id,
-                    step_number=entry.step_number,
-                    action=entry.action,
-                    label=entry.label,
-                    status=entry.status,
-                    error_type=entry.error_type,
-                    detected_action=entry.detected_action,
-                    detected_object=entry.detected_object,
-                    confidence=entry.confidence,
-                    latency_ms=entry.latency_ms,
-                )
+                self._db.log_structured_event({
+                    "experiment_id": entry.experiment_id,
+                    "execution_id": entry.execution_id,
+                    "timestamp": entry.timestamp,
+                    "timestamp_epoch": time.time(),
+                    "elapsed_time": entry.elapsed_seconds,
+                    "step_number": entry.step_number,
+                    "total_steps": entry.total_steps,
+                    "expected_action": entry.expected_action,
+                    "detected_action": entry.detected_action,
+                    "target_object": entry.detected_object,
+                    "status": entry.validation_status,
+                    "procedure_state": entry.procedure_state,
+                    "confidence": entry.confidence,
+                    "event_type": entry.event_type,
+                    "voice_guidance": entry.voice_guidance,
+                    "deviation_reason": entry.deviation_reason,
+                    "source": entry.source,
+                })
             except Exception as exc:
-                logger.warning("DB log error: %s", exc)
+                logger.warning("DB log_structured_event error: %s", exc)
 
             # 2. JSONL write-through (append-only)
             try:

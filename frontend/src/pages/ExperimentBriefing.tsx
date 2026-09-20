@@ -2,43 +2,67 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Play, Check, AlertTriangle, Film } from 'lucide-react';
 import { BACKEND_BASE, connectCamera } from '../api/camera';
+import voiceController from '../services/voiceController';
 
 export default function ExperimentBriefing() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const isVData = id === 'EXP-VDATA' || (id && id.toLowerCase().includes('vdata'));
-  const isMicrobe = !isVData && (id === 'EXP-MICROBE' || id === 'EXP-MICROBIAL' || (id && id.toLowerCase().includes('microbe')));
-  const isYellowBlueBox = !isVData && !isMicrobe && (!id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04');
-  const isSampleAnalysis = !isVData && !isMicrobe && (id === 'EXP-02' || id === 'EXP-2' || id === 'EXP-07');
-
-  const MICROBE_DEFAULT_VIDEO = 'WhatsApp Video 2026-09-20 at 3.05.43 PM.mp4';
-  const [selectedVideo, setSelectedVideo] = useState(() => isMicrobe ? MICROBE_DEFAULT_VIDEO : '20260905_145858.mp4');
+  const [selectedVideo, setSelectedVideo] = useState('20260905_145858.mp4');
   const [availableVideos, setAvailableVideos] = useState<any[]>([]);
   const [isStarting, setIsStarting] = useState(false);
 
   const [useReferenceVideo, setUseReferenceVideo] = useState(true);
 
+  const isVData = id === 'EXP-VDATA' || (id && id.toLowerCase().includes('vdata'));
+  const isMicrobe = !isVData && (id === 'EXP-MICROBE' || id === 'EXP-MICROBIAL' || (id && id.toLowerCase().includes('microbe')));
+  const isYellowBlueBox = !isVData && !isMicrobe && (!id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04');
+  const isSampleAnalysis = !isVData && !isMicrobe && (id === 'EXP-02' || id === 'EXP-2' || id === 'EXP-07');
+
   useEffect(() => {
-    if (isVData || isYellowBlueBox || isMicrobe) {
-      fetch(`${BACKEND_BASE}/api/vdata/videos`)
+    // Terminate any background or orphaned speech on briefing mount
+    voiceController.stopExperimentSession();
+    voiceController.stopAllSpeech();
+  }, []);
+
+  useEffect(() => {
+    if (isMicrobe) {
+      const microbeVid = 'WhatsApp Video 2026-09-20 at 3.05.43 PM.mp4';
+      setSelectedVideo(microbeVid);
+      setAvailableVideos([
+        {
+          filename: microbeVid,
+          duration_seconds: 45.0,
+          total_frames: 1350,
+          fps: 30.0,
+        },
+      ]);
+    } else if (isVData || isYellowBlueBox) {
+      fetch(`${BACKEND_BASE}/api/vdata/videos?experiment_id=${id || 'EXP-01'}`)
         .then(res => res.json())
         .then(data => {
           if (Array.isArray(data) && data.length > 0) {
-            setAvailableVideos(data);
+            const filtered = data.filter((v: any) => 
+              !v.filename.toLowerCase().includes('whatsapp') && 
+              !v.filename.toLowerCase().includes('microbe')
+            );
+            setAvailableVideos(filtered);
+            if (filtered.length > 0 && (!selectedVideo || selectedVideo.includes('WhatsApp'))) {
+              setSelectedVideo(filtered[0].filename);
+            }
           }
         })
         .catch(() => {});
     }
-  }, [isVData, isYellowBlueBox, isMicrobe]);
+  }, [id, isMicrobe, isVData, isYellowBlueBox]);
 
   const handleStart = async () => {
     setIsStarting(true);
-    const targetVideo = isMicrobe ? (selectedVideo !== '20260905_145858.mp4' ? selectedVideo : MICROBE_DEFAULT_VIDEO) : selectedVideo;
-    if (isVData || isMicrobe || (isYellowBlueBox && useReferenceVideo)) {
+    const targetVid = isMicrobe ? 'WhatsApp Video 2026-09-20 at 3.05.43 PM.mp4' : selectedVideo;
+    if (isVData || (isYellowBlueBox && useReferenceVideo) || isMicrobe) {
       try {
         await connectCamera({
           source: 'video_file',
-          path: `vdata/${targetVideo}`,
+          path: `vdata/${targetVid}`,
           loop: true,
           reset_fsm: true,
         });
@@ -46,7 +70,7 @@ export default function ExperimentBriefing() {
         console.error('Failed to pre-connect video:', e);
       }
     }
-    const query = `?video=${encodeURIComponent(targetVideo)}`;
+    const query = `?video=${encodeURIComponent(targetVid)}`;
     navigate(`/experiments/${id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01')}/live${query}`);
   };
 

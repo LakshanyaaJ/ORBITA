@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useTelemetry } from '../api/telemetry';
+import voiceController from '../services/voiceController';
 import clsx from 'clsx';
 import { 
   AlertTriangle, 
@@ -59,8 +60,6 @@ const MICROBE_7_STEPS = [
   { id: 7, action: "EXPERIMENT_COMPLETE", label: "Complete Experiment", expected_object: "ALL" },
 ];
 
-export type VideoSourceMode = 'LIVE_CAMERA' | 'VDATA_VIDEO';
-
 export default function LiveExperiment() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -68,24 +67,16 @@ export default function LiveExperiment() {
   const isVData = id === 'EXP-VDATA' || (Boolean(id) && id!.toLowerCase().includes('vdata'));
   const isMicrobe = !isVData && (id === 'EXP-MICROBE' || id === 'EXP-MICROBIAL' || (Boolean(id) && id!.toLowerCase().includes('microbe')));
 
-  const MICROBE_DEFAULT_VIDEO = 'WhatsApp Video 2026-09-20 at 3.05.43 PM.mp4';
-  const queryVideo = searchParams.get('video') || (isMicrobe ? MICROBE_DEFAULT_VIDEO : '20260905_145858.mp4');
+  const microbeVideo = 'WhatsApp Video 2026-09-20 at 3.05.43 PM.mp4';
+  const queryVideo = searchParams.get('video') || (isMicrobe ? microbeVideo : '20260905_145858.mp4');
   const [currentVideo, setCurrentVideo] = useState(queryVideo);
-
-  // Explicit source state: LIVE_CAMERA or VDATA_VIDEO
-  const [sourceMode, setSourceMode] = useState<VideoSourceMode>(() => {
-    if (isMicrobe || isVData || searchParams.has('video') || searchParams.get('source') === 'vdata') {
-      return 'VDATA_VIDEO';
-    }
-    return 'LIVE_CAMERA';
-  });
 
   const isYellowBlueBox = !isVData && !isMicrobe && (!id || id === 'EXP-01' || id === 'EXP-1' || id === 'EXP-04');
   const { data, isConnected } = useTelemetry();
   const [videoError, setVideoError] = useState(false);
   const [streamVersion, setStreamVersion] = useState(Date.now());
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
-  const isVideoMode = isMicrobe || isVData || searchParams.has('video') || cameraStatus?.source === 'video_file' || (isYellowBlueBox && (!cameraStatus?.connected || cameraStatus?.source === 'sim'));
+  const isVideoMode = (isVData || searchParams.has('video') || cameraStatus?.source === 'video_file' || (isYellowBlueBox && (!cameraStatus?.connected || cameraStatus?.source === 'sim'))) && !isMicrobe;
   const [isDebugMode, setIsDebugMode] = useState(true);
   const [rotation, setRotation] = useState<number>(0);
   const [isExpandedVideo, setIsExpandedVideo] = useState<boolean>(false);
@@ -156,34 +147,46 @@ export default function LiveExperiment() {
     }
   };
 
-  // Fetch available vdata videos dynamically so any new videos appear in the selector
   useEffect(() => {
-    fetch(`${BACKEND_BASE}/api/vdata/videos`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setAvailableVideos(data);
-          if (isMicrobe) {
-            const microbeVid = data.find((v: any) => v.filename.toLowerCase().includes('whatsapp') || v.filename.toLowerCase().includes('microbe'));
-            if (microbeVid) {
-              setCurrentVideo(microbeVid.filename);
-            }
+    if (isMicrobe) {
+      setAvailableVideos([
+        {
+          filename: microbeVideo,
+          duration_seconds: 45.0,
+          total_frames: 1350,
+          fps: 30.0,
+        },
+      ]);
+    } else {
+      fetch(`${BACKEND_BASE}/api/vdata/videos?experiment_id=${id || 'EXP-01'}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) {
+            const filtered = data.filter((v: any) => 
+              !v.filename.toLowerCase().includes('whatsapp') && 
+              !v.filename.toLowerCase().includes('microbe')
+            );
+            setAvailableVideos(filtered);
           }
-        }
-      })
-      .catch((err) => console.error('Failed to load vdata videos:', err));
-  }, [isMicrobe]);
+        })
+        .catch((err) => console.error('Failed to load vdata videos:', err));
+    }
+  }, [id, isMicrobe]);
 
   // Auto-arm session start on mount once so video recording, VDATA video loading, and write-through logging start synchronously
   const armedRef = useRef(false);
   useEffect(() => {
     if (armedRef.current) return;
     armedRef.current = true;
-    const targetVid = currentVideo || queryVideo || (isMicrobe ? MICROBE_DEFAULT_VIDEO : '20260905_145858.mp4');
-    const payload: any = { action: 'start', experiment_id: id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01') };
-    if (isMicrobe || isVData || sourceMode === 'VDATA_VIDEO' || isVideoMode) {
+    const currentExpId = id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01');
+    const payload: any = { action: 'start', experiment_id: currentExpId };
+    if (isMicrobe) {
       payload.source = 'video_file';
-      payload.video_path = `vdata/${targetVid}`;
+      payload.video_path = `vdata/${microbeVideo}`;
+      payload.loop = true;
+    } else if (isVData || isVideoMode) {
+      payload.source = 'video_file';
+      payload.video_path = `vdata/${queryVideo}`;
       payload.loop = true;
     }
     fetch(`${BACKEND_BASE}/api/control`, {
@@ -293,64 +296,45 @@ export default function LiveExperiment() {
     }
   };
 
-  // Audio & Voice Guidance Synthesis (Host & Browser)
+  // Audio & Voice Guidance Synthesis (Host & Browser) via voiceController
   const [isVoiceEnabled, setIsVoiceEnabled] = useState<boolean>(() => {
     return localStorage.getItem('orbita_voice_enabled') !== 'false';
   });
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
-  const lastSpokenTextRef = useRef<string>('');
+  const sessionIdRef = useRef<string>('');
+
+  useEffect(() => {
+    const activeExpId = id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01');
+    voiceController.setAuthenticated(true);
+    const sessId = voiceController.startExperimentSession(activeExpId);
+    sessionIdRef.current = sessId;
+
+    return () => {
+      // STOP voice session & cancel all TTS immediately when user leaves/exits live experiment view
+      voiceController.stopExperimentSession(sessId);
+      voiceController.stopAllSpeech();
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch (e) {}
+      }
+    };
+  }, [id, isMicrobe, isVData]);
 
   const speakText = (text: string, force: boolean = false) => {
     if (!text) return;
     const cleanText = text.trim();
     if (!cleanText || (!isVoiceEnabled && !force)) return;
-    if (!force && lastSpokenTextRef.current === cleanText) return;
-    lastSpokenTextRef.current = cleanText;
 
-    // Trigger backend speak API for host speaker output
-    fetch(`${BACKEND_BASE}/api/voice/speak`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: cleanText }),
-    }).catch(() => {});
-
-    // Web Speech API for direct browser client playback (Female Voice selection)
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.rate = 1.0;
-        utterance.pitch = 1.05;
-        utterance.volume = 1.0;
-
-        // Auto-select female voice
-        const voices = window.speechSynthesis.getVoices();
-        const femaleVoice = voices.find((v) => {
-          const name = v.name.toLowerCase();
-          return (
-            name.includes('zira') ||
-            name.includes('hazel') ||
-            name.includes('female') ||
-            name.includes('samantha') ||
-            name.includes('victoria') ||
-            name.includes('karen') ||
-            name.includes('aria') ||
-            name.includes('jenny') ||
-            (name.includes('english') && !name.includes('david') && !name.includes('george') && !name.includes('mark'))
-          );
-        });
-        if (femaleVoice) {
-          utterance.voice = femaleVoice;
-        }
-
-        utterance.onstart = () => setIsSpeaking(true);
-        utterance.onend = () => setIsSpeaking(false);
-        utterance.onerror = () => setIsSpeaking(false);
-        window.speechSynthesis.speak(utterance);
-      } catch (e) {
-        console.warn('Browser speechSynthesis error:', e);
-      }
-    }
+    const activeExpId = id || (isMicrobe ? 'EXP-MICROBE' : isVData ? 'EXP-VDATA' : 'EXP-01');
+    voiceController.speak(cleanText, {
+      experimentId: activeExpId,
+      sessionId: sessionIdRef.current,
+      force,
+      voiceEnabled: isVoiceEnabled,
+      onStart: () => setIsSpeaking(true),
+      onEnd: () => setIsSpeaking(false),
+    });
   };
 
   useEffect(() => {
@@ -636,29 +620,11 @@ export default function LiveExperiment() {
                      cameraStatus?.source_play_state === 'STARTING' ? '◌ INIT...' :
                      cameraStatus?.source_play_state === 'STALE' ? '⚠ STALLED' : '● ACTIVE'}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setSourceMode('LIVE_CAMERA')}
-                    className="ml-1 px-2 py-0.5 rounded bg-space-800 hover:bg-space-700 text-space-400 hover:text-white border border-space-700 flex items-center gap-1 text-[10px] font-mono font-bold transition-colors"
-                    title="Switch to Live Camera Stream"
-                  >
-                    <Camera size={11} />
-                    <span>LIVE CAM</span>
-                  </button>
                 </>
               ) : (
                 <div className="flex items-center gap-2 text-[11px] text-space-300">
                   <span className="text-space-400">SOURCE:</span>
                   <span className="text-accent-cyan font-bold">{getSourceLabel()}</span>
-                  <button
-                    type="button"
-                    onClick={() => setSourceMode('VDATA_VIDEO')}
-                    className="ml-2 px-2 py-0.5 rounded bg-space-800 hover:bg-space-700 text-accent-cyan border border-space-600 flex items-center gap-1 text-[10px] font-bold transition-colors"
-                    title="Switch to Video Reference Mode"
-                  >
-                    <Film size={11} />
-                    <span>VDATA VIDEO</span>
-                  </button>
                 </div>
               )}
             </div>
@@ -970,8 +936,8 @@ export default function LiveExperiment() {
                       const nextVal = !isVoiceEnabled;
                       setIsVoiceEnabled(nextVal);
                       localStorage.setItem('orbita_voice_enabled', String(nextVal));
-                      if (!nextVal && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-                        window.speechSynthesis.cancel();
+                      if (!nextVal) {
+                        voiceController.stopAllSpeech();
                       }
                     }}
                     className={clsx(

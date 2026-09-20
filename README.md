@@ -19,7 +19,7 @@ ORBITA processes multi-modal video and sensor inputs locally at the edge, extrac
 EXPERIMENT INPUT (Video / Stream / Sim)
      │
      ▼
-LOCAL EDGE PROCESSING (YOLOv8 Object Detection)
+LOCAL EDGE PROCESSING (YOLOv11 Object Detection)
      │
      ▼
 HUMAN MESH RECOVERY (HMR / 24 SMPL 3D Joints & Orientation)
@@ -52,7 +52,7 @@ GROUND CONTROL SYSTEM (HTTP 200 ACK / Hash Verification)
 
 - **Frontend**: React 19, TypeScript 5.8, Tailwind CSS 4, Vite 8, Recharts
 - **Backend**: Python 3.13, FastAPI, Pydantic, Uvicorn
-- **Computer Vision**: OpenCV, YOLOv8 (`yolov8n.pt`, custom fine-tuned weights), MediaPipe
+- **Computer Vision**: OpenCV, YOLOv11 (`yolo11n.pt`, custom fine-tuned weights), MediaPipe
 - **Human Mesh Recovery**: 24-Joint SMPL 3D Kinematic Lifter (`HMRPipeline`) with explicit fallback transparency
 - **Temporal HAR**: PyTorch GRU (30-frame temporal window, 64-dim feature vector)
 - **Procedural Engine**: 13-step deterministic FSM + Dynamic JSON Rule Engine

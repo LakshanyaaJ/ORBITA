@@ -133,7 +133,7 @@ export default function MissionHome() {
               ASSIGNED EXPERIMENTS
             </h2>
             <span className="font-mono text-[11px] text-space-400">
-              3 PROTOCOLS LOADED
+              3 EXPERIMENTS ASSIGNED
             </span>
           </div>
           
@@ -149,16 +149,6 @@ export default function MissionHome() {
               onClick={() => navigate('/experiments/EXP-VDATA/briefing')}
             />
             <ExperimentCard 
-              id="EXP-01" 
-              name="YELLOW AND BLUE BOX" 
-              payload="BOX-01 PAYLOAD"
-              steps={13} 
-              status="READY"
-              description="Autonomous identification, manipulation, and placement validation of Yellow and Blue box experiment assets."
-              nextAction="Step 01 Identify Blue Box"
-              onClick={() => navigate('/experiments/EXP-01/briefing')}
-            />
-            <ExperimentCard 
               id="EXP-MICROBE" 
               name="MICROBIAL EXPERIMENT IN MICROGRAVITY" 
               payload="ISRO–AXIOM-4 CONTEXT"
@@ -172,10 +162,11 @@ export default function MissionHome() {
               id="EXP-02" 
               name="SAMPLE ANALYSIS" 
               payload="BIO-CHAMBER 02"
-              steps={5} 
-              status="PENDING"
-              description="Centrifuge extraction, reagent vial placement, and spectral optical validation."
-              onClick={() => {}}
+              steps={2} 
+              status="READY"
+              description="Sample preparation, reagent vial placement, and spectral optical validation."
+              nextAction="Step 01 Sample Preparation"
+              onClick={() => navigate('/experiments/EXP-02/briefing')}
             />
           </div>
           

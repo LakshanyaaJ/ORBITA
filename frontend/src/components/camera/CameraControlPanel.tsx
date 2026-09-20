@@ -45,7 +45,11 @@ export default function CameraControlPanel({
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setVdataVideos(data);
+          const filtered = data.filter((v: any) => 
+            !v.filename.toLowerCase().includes('whatsapp') && 
+            !v.filename.toLowerCase().includes('microbe')
+          );
+          setVdataVideos(filtered);
         }
       })
       .catch((err) => console.warn('Failed to load vdata videos in control panel:', err));
